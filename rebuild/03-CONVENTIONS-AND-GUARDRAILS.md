@@ -76,8 +76,15 @@ Everything else is `await` + `try/catch`. If you're tempted to write `.then()` a
 - Index/array access yields `T | undefined`. Narrow it: `const x = arr[0]; if (!x) throw …` or `arr[0]!` only when provably safe with a comment.
 - Destructured DB `.returning()` results are `T | undefined` — guard them (`if (!row) throw new Error("insert returned no row")`).
 
+## Package manager & stack
+
+- **pnpm 11** (not npm), via Corepack. Commands: `pnpm install` / `pnpm dev` / `pnpm typecheck` / `pnpm db:migrate`; reproducible installs use `pnpm install --frozen-lockfile`. Supply-chain settings (`minimumReleaseAge`, `allowBuilds`) live in `pnpm-workspace.yaml`; `pnpm-lock.yaml` is committed. See `reference/supply-chain-and-ci.md`.
+- Stack: **Express 5, PostgreSQL 18, Playwright 1.60, Node 22**, frontend **React 18 / Tailwind 3** (the React 19 / Tailwind 4 jump is a separate, documented upgrade — don't introduce it ad hoc).
+- Adding a dependency is adding supply-chain surface — don't do it casually. A new dep that needs a build script must be allow-listed in `pnpm-workspace.yaml` (`allowBuilds`), deliberately.
+
 ## Error handling (HTTP boundary)
 
+- **Express 5 awaits async handlers** and forwards a rejected promise to the global error middleware — so a `throw` in an `async` route reaches the error handler (it would crash the process on Express 4). You still **validate with Zod (`safeParse`) and respond explicitly**; don't rely on throwing as normal control flow.
 - **Route handlers never throw across the HTTP boundary unhandled.** Validate with Zod (`safeParse`), respond with a JSON error on failure.
 - The **global error handler** in `index.ts` is the backstop: log the error, respond `500 {"error":"Internal server error"}`, never leak a stack trace.
 - Validation failures → `400` with `{ error, details: parsed.error.flatten() }`.
@@ -108,7 +115,7 @@ Concrete consequences:
 ## Database rules
 
 - All feature queries go through Drizzle. The only raw SQL allowed is the `select 1` health check and migrations.
-- Schema changes: edit `src/db/schema.ts` → `npm run db:generate -- --name <change>` → review generated SQL → `npm run db:migrate`. **Never edit a committed migration.**
+- Schema changes: edit `src/db/schema.ts` → `pnpm db:generate -- --name <change>` → review generated SQL → `pnpm db:migrate`. **Never edit a committed migration.**
 - Insert-as-`pending` then rely on the partial unique index for run gating. **Never** `SELECT WHERE running` then `INSERT`.
 
 ## Module ownership rules (enforced "only place that imports X")

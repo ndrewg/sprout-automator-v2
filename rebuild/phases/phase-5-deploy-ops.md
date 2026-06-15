@@ -10,8 +10,10 @@
 
 ## 5.1 — Target
 
-- **Hetzner CPX11** (2 GB RAM, 2 vCPU, 40 GB NVMe), **Singapore** (lowest latency to Manila HRHub), Ubuntu 24.04, ~$5/mo.
-- Rejected: RackNerd (flaky), DigitalOcean (overpriced). Don't undersize RAM — each Chromium is ~300 MB and `MAX_CONCURRENT_RUNS=3`.
+- **Hetzner CPX21** (**4 GB** RAM, 3 vCPU, 80 GB NVMe), **Singapore** (lowest latency to Manila HRHub), Ubuntu 24.04, ~$8/mo.
+- **Why 4 GB, not the 2 GB CPX11:** each Chromium is ~300 MB and `MAX_CONCURRENT_RUNS=3`, plus Postgres (~150 MB) + Node + Caddy. On 2 GB the 5:30 AM stampede risks an OOM-kill; 4 GB gives real headroom. If you ever do run on 2 GB, drop the cap to **2**.
+- Keep `MAX_CONCURRENT_RUNS=3` (or 4) on the 4 GB box. Don't raise it without watching memory.
+- Rejected: RackNerd (flaky), DigitalOcean (overpriced).
 
 ## 5.2 — VPS hardening checklist
 
@@ -24,11 +26,11 @@
 
 ## 5.3 — Production Dockerfile
 
-Use the multi-stage `Dockerfile` from `04` verbatim. Key properties to preserve:
-- Stage 1 `node:20-alpine` builds the **frontend** → `dist`.
-- Stage 2 `mcr.microsoft.com/playwright:v1.49.1-noble` (must match the pinned `playwright@1.49.1`) installs backend prod deps, copies `src`/`drizzle`/`tsconfig`/`drizzle.config.ts`, copies the frontend `dist` → `./public`.
+Use the multi-stage `Dockerfile` from `04` / `reference/supply-chain-and-ci.md` verbatim. Key properties to preserve:
+- Stage 1 `node:22-alpine` builds the **frontend** with pnpm (`pnpm install --frozen-lockfile` → `pnpm build`) → `dist`.
+- Stage 2 `mcr.microsoft.com/playwright:v1.60.0-noble` (**must match the pinned `playwright@1.60.0`**) installs backend prod deps via `pnpm install --frozen-lockfile --prod`, copies `src`/`drizzle`/`tsconfig`/`drizzle.config.ts`, copies the frontend `dist` → `./public`.
 - Creates `/app/data`, `chown` to `pwuser`, runs as **non-root `pwuser`**.
-- `CMD ["npx","tsx","src/index.ts"]` — runs TypeScript directly, no compile.
+- `CMD ["pnpm","exec","tsx","src/index.ts"]` — runs TypeScript directly, no compile.
 
 ## 5.4 — Caddy TLS overlay
 
@@ -43,7 +45,7 @@ sprout.yourdomain.com {
 ```
 IP-only mode: `:443 { tls internal\n encode gzip\n reverse_proxy backend:3000 }`.
 
-Bring up: `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build`, then `docker compose exec backend npm run db:migrate` (first time / when migrations change).
+Bring up: `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build`, then `docker compose exec backend pnpm db:migrate` (first time / when migrations change).
 
 ## 5.5 — Backups
 

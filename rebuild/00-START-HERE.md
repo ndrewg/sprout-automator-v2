@@ -98,6 +98,10 @@ Read the foundation docs in order once, then work the phases.
 - [`reference/api-contract.md`](./reference/api-contract.md)
 - [`reference/hrhub-automation-playbook.md`](./reference/hrhub-automation-playbook.md)
 - [`reference/crypto-and-otp-specs.md`](./reference/crypto-and-otp-specs.md)
+- [`reference/supply-chain-and-ci.md`](./reference/supply-chain-and-ci.md) — pnpm 11 hardening, gitleaks, CI (attach to Phase 0)
+
+**Upgrade path (not part of the baseline build — do later):**
+- [`UPGRADE-PATH-react19-tailwind4.md`](./UPGRADE-PATH-react19-tailwind4.md) — migrate the frontend to React 19 / Tailwind 4 once you run a model with a ≥mid-2025 cutoff.
 
 ---
 

@@ -18,14 +18,14 @@ Build in four sub-steps. **The mutation rule (D11 / §03) is the thing that brok
 
 ## 3A — Scaffold the frontend
 
-1. `cd app && npm create vite@latest frontend -- --template react-ts`.
-2. Replace `frontend/package.json` deps with the exact set in `04`; `npm install`.
-3. Tailwind 3: `npx tailwindcss init -p` → configure `tailwind.config.js` `content: ["./index.html","./src/**/*.{ts,tsx}"]`, add the shadcn theme tokens (CSS variables) and `tailwindcss-animate` plugin. Add the shadcn base layer to `src/index.css` (`@tailwind base/components/utilities` + the `:root`/`.dark` HSL variables).
+1. `cd app && pnpm create vite frontend --template react-ts`.
+2. Replace `frontend/package.json` deps with the exact set in `04` (add `pnpm-workspace.yaml`); `pnpm install`.
+3. Tailwind 3: `pnpm dlx tailwindcss init -p` → configure `tailwind.config.js` `content: ["./index.html","./src/**/*.{ts,tsx}"]`, add the shadcn theme tokens (CSS variables) and `tailwindcss-animate` plugin. Add the shadcn base layer to `src/index.css` (`@tailwind base/components/utilities` + the `:root`/`.dark` HSL variables).
 4. `vite.config.ts` — verbatim from `04` (the `@`→`src` alias and the dev proxy are both required).
 5. `src/lib/utils.ts` → the standard shadcn `cn` helper (`clsx` + `tailwind-merge`).
 6. Vendor the shadcn components used into `src/components/ui/`: `button`, `card`, `input`, `label`, `badge`, `alert`, `checkbox`. (Generate via the shadcn CLI or paste the standard component sources — they depend only on the Radix/cva/clsx deps already installed. `alert` needs `success`/`warning`/`info`/`destructive` variants; `badge` needs `secondary`/`success`/`warning`/`info`/`destructive`.)
 
-**Gate 3A:** `npm run dev` serves a blank styled page at `http://localhost:5173`; Tailwind classes apply; no console errors.
+**Gate 3A:** `pnpm dev` serves a blank styled page at `http://localhost:5173`; Tailwind classes apply; no console errors.
 
 ---
 
@@ -44,7 +44,7 @@ Build in four sub-steps. **The mutation rule (D11 / §03) is the thing that brok
    - `useRuns` → `useQuery(["runs"])` with **adaptive `refetchInterval`**: 1500 ms if any run is `pending`/`running`, else 5000 ms; `useStartRun` + `useSubmitOtp` → mutations invalidating `["runs"]`.
    > ⚑ RECOMMENDED #5: type the `refetchInterval` callback with TanStack's `Query` type instead of `any`.
 
-**Gate 3B:** `npm run typecheck`/build clean. (Behavior is exercised in 3C/3D.)
+**Gate 3B:** `pnpm typecheck`/build clean. (Behavior is exercised in 3C/3D.)
 
 ---
 

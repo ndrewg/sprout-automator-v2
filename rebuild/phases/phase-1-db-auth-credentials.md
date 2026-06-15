@@ -19,16 +19,16 @@
 1. Create `src/db/schema.ts`, `src/db/client.ts`, `src/db/migrate.ts` — **verbatim from `reference/database-schema.md`.**
 2. Generate the initial migration:
    ```bash
-   cd app/backend && npm run db:generate -- --name init
+   cd app/backend && pnpm db:generate -- --name init
    ```
    Open the generated SQL in `app/backend/drizzle/` and **confirm** it contains:
    - `users_email_unique` on `lower(email)`
    - `runs_one_active_per_user` as a **partial** unique index with `WHERE status IN ('pending','running')`
    - the `ON DELETE CASCADE` / `SET NULL` FKs as specified
-3. Apply it: `npm run db:migrate` → `[migrate] done`.
+3. Apply it: `pnpm db:migrate` → `[migrate] done`.
 4. Wire the real DB health check into `index.ts`: `await db.execute(sql\`select 1\`)` in a try/catch → `db:"ok"|"down"`.
 
-**Gate 1A:** `npm run db:migrate` succeeds; `/health` returns `db:"ok"`; the partial index exists (`docker compose exec postgres psql -U sprout -d sprout -c '\d runs'` shows the partial unique index).
+**Gate 1A:** `pnpm db:migrate` succeeds; `/health` returns `db:"ok"`; the partial index exists (`docker compose exec postgres psql -U sprout -d sprout -c '\d runs'` shows the partial unique index).
 
 ---
 

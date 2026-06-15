@@ -18,7 +18,9 @@ You are implementing the Sprout Automator from the spec in this `rebuild/` direc
 - Each phase file lists its exact commit checkpoints; tag phase completions (`git tag phase-2-complete`).
 
 ## Hard rules (each maps to a real decision or a real bug)
-1. **TypeScript only, ESM.** `moduleResolution: "Bundler"` + run via `tsx`. **No `.js` extensions on relative imports.** No compile step for the backend.
+1. **TypeScript only, ESM.** `moduleResolution: "Bundler"` + run via `tsx`. **No `.js` extensions on relative imports.** No compile step for the backend. Stack: **Express 5, Postgres 18, Playwright 1.60, Node 22, pnpm 11**; frontend **React 18 / Tailwind 3** (do not introduce React 19 / Tailwind 4 — that's a separate documented upgrade).
+   - **Express 5:** async route handlers may `throw`; rejections reach the global error middleware automatically. Still validate with Zod and respond explicitly. The SPA catch-all is a **regex**, not `"*"`.
+   - **pnpm 11, not npm:** commands are `pnpm install` / `pnpm dev` / `pnpm typecheck` / `pnpm db:migrate`; installs use `--frozen-lockfile`. Don't add a dependency casually — each new dep is supply-chain surface; if you must, add it with `pnpm add` and note it. New build scripts require an `allowBuilds` entry in `pnpm-workspace.yaml`.
 2. **Async/await + try/catch for ALL sequential logic. Never `.then().catch()` for control flow.** The only allowed `.catch()` are three contained idioms, reproduced verbatim where the spec shows them: Playwright best-effort probes (`await locator.isVisible().catch(() => false)`), fire-and-forget cleanup (`.catch(() => {})`), and the top-level `main().catch(...)`. Never generalize them.
 3. **Modern idioms:** `const`/`let` (never `var`); `?.`/`??`; `for...of` or `Promise.all`/`any` for awaiting loops (never `await` in `.forEach`); `node:` import specifier for built-ins; `catch (err: unknown)` + narrowing.
 4. **Secrets never leak** — no password, app password, OTP code, session id, or key in any log, response body, error message, or audit metadata. `GET /credentials` returns passwords only as `*Set` booleans.

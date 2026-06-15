@@ -6,12 +6,27 @@ At the end: **architecture diagrams**, **the data model summary**, and **my reco
 
 ---
 
+## June 2026 stack revisions (read first — these override the version numbers in the original decisions below)
+
+A review before the fresh build updated several version/tech choices. The *architecture* is unchanged; these are version bumps + two new cross-cutting decisions:
+
+- **Express 5** (was 4). Express 5 awaits async route handlers and forwards rejected promises to the error middleware — closing a latent bug where an `async` `throw` on Express 4 + Node would escape the global error handler (and could crash the process). See **D13**.
+- **PostgreSQL 18** (was 16) — latest security patches; drop-in image-tag change.
+- **Playwright 1.60.0** (was 1.49.1), npm package and Docker base image tag (`v1.60.0-noble`) bumped together.
+- **Node 22** for the frontend build stage (was 20).
+- **pnpm 11** as the package manager (was npm), for supply-chain hardening — script-blocking (`allowBuilds`) + release cooldown (`minimumReleaseAge`). See **D14** and `reference/supply-chain-and-ci.md`.
+- **gitleaks pre-commit + minimal CI** (typecheck/test/audit) from commit 1 — adopted, not deferred (see improvements list at the end; the tsx-no-compile choice makes the typecheck gate essential).
+- **Frontend stays React 18 / Tailwind 3** deliberately — matched to the current local model's late-2024 training cutoff. The migration to React 19 / Tailwind 4 is fully specced in `UPGRADE-PATH-react19-tailwind4.md` for when a newer-cutoff model is in use. See **D15**.
+- **Deploy target is now Hetzner CPX21 (4 GB)** not CPX11 (2 GB) — headroom for 3 concurrent Chromiums. See **D12**.
+
+Everything else below stands. Where a decision names an old version, the value above wins.
+
 ## Locked decisions
 
 ### D1 — TypeScript, ESM, `tsx`-run, Bundler resolution (NO `.js` extensions)
 - TypeScript only. No `.js` files in the backend. `"type": "module"` (ESM).
 - `tsconfig.json`: `target ES2022`, `module ESNext`, **`moduleResolution: "Bundler"`**, `noEmit: true`, `allowImportingTsExtensions: true`, plus strict + `noUncheckedIndexedAccess` + `noImplicitOverride` + `noPropertyAccessFromIndexSignature`.
-- **The backend is never compiled.** It is run directly with `tsx` in *both* dev (`tsx watch`) and production (`npx tsx src/index.ts` in the container). There is no `dist/`.
+- **The backend is never compiled.** It is run directly with `tsx` in *both* dev (`tsx watch`) and production (`pnpm exec tsx src/index.ts` in the container). There is no `dist/`.
 - **Because resolution is Bundler, relative imports have NO extension:** `import { db } from "../db/client"` — *not* `"../db/client.js"`.
 > ⚠️ **This supersedes the original ADR 0001**, which specified NodeNext + `.js` extensions. The project moved to Bundler + tsx. Build to the current reality described here. If you see `.js` extensions anywhere, that's stale.
 
@@ -95,10 +110,25 @@ Two *independent* mechanisms solving two *different* problems — do not merge t
 - **The one prescriptive frontend rule (this caused a real bug):** inside an `async` handler with `try/catch`, you **must** use `await mutation.mutateAsync(...)`. Never call fire-and-forget `mutation.mutate(...)` and expect the `catch` to fire. Full rule + examples in `03-CONVENTIONS-AND-GUARDRAILS.md`.
 
 ### D12 — Deploy: single VPS, Docker Compose, Caddy for TLS
-- Target: **Hetzner CPX11** (2 GB, 2 vCPU, Singapore — closest to Manila), Ubuntu 24.04, ~$5/mo. Alternatives rejected: RackNerd (flaky), DigitalOcean (overpriced).
-- Two containers via `docker-compose.yml`: `postgres:16-alpine` + the backend (built on the Playwright base image). A prod overlay adds a `caddy:2-alpine` container for automatic Let's Encrypt TLS, and stops exposing the backend port publicly.
-- Backend Dockerfile is multi-stage: a `node:20-alpine` stage builds the frontend → its `dist` is copied into the runtime image's `./public`; the runtime stage is `mcr.microsoft.com/playwright:v1.49.1-noble`, runs as non-root `pwuser`, and starts with `npx tsx src/index.ts`.
+- Target: **Hetzner CPX21** (**4 GB**, 3 vCPU, Singapore — closest to Manila), Ubuntu 24.04, ~$8/mo. The 4 GB (vs the 2 GB CPX11) is for headroom: 3 × Chromium (~300 MB each) + Postgres + Node + Caddy exceeds 2 GB at the 5:30 AM stampede. On 2 GB, drop `MAX_CONCURRENT_RUNS` to 2. Alternatives rejected: RackNerd (flaky), DigitalOcean (overpriced).
+- Two containers via `docker-compose.yml`: `postgres:18-alpine` + the backend (built on the Playwright base image). A prod overlay adds a `caddy:2-alpine` container for automatic Let's Encrypt TLS, and stops exposing the backend port publicly.
+- Backend Dockerfile is multi-stage: a `node:22-alpine` stage builds the frontend with pnpm → its `dist` is copied into the runtime image's `./public`; the runtime stage is `mcr.microsoft.com/playwright:v1.60.0-noble`, runs as non-root `pwuser`, and starts with `pnpm exec tsx src/index.ts`.
 - Daily `pg_dump` backups; off-host encrypted copies recommended.
+
+### D13 — Express 5 (async errors reach the error handler)
+- Use **Express 5**, not 4. Express 5 awaits async route handlers and routes a rejected promise to the error-handling middleware. On Express 4, a `throw` inside an `async` handler is an unhandled rejection — it bypasses the global error handler and, under Node's default, can terminate the process. Several handlers legitimately throw (e.g. signup rethrowing a non-`23505` DB error, `if (!row) throw`), so this is a real correctness fix, not cosmetic.
+- The SPA catch-all route is a **regex** (negative-lookahead on the API prefixes), which is compatible with Express 5's stricter path syntax (don't use a bare `"*"` string path).
+- Handlers still validate with Zod and respond explicitly; D13 just makes the "never throw across the boundary unhandled" rule actually hold instead of being a footgun.
+
+### D14 — Supply-chain hardening: pnpm 11 + gitleaks + CI
+- Package manager is **pnpm 11** (via Corepack), chosen for two on-by-default protections against the shai-hulud class of npm supply-chain attacks: **`allowBuilds`** (dependency lifecycle/build scripts are refused unless explicitly allow-listed — neutralizes malicious `postinstall`) and **`minimumReleaseAge`** (won't install a version published in the last N minutes — dodges the live-compromise window). Settings live in `pnpm-workspace.yaml` (pnpm 11 makes `.npmrc` registry/auth-only).
+- `pnpm-lock.yaml` is committed; all CI/Docker installs use `--frozen-lockfile`.
+- **gitleaks** pre-commit hook blocks secret commits; a **minimal CI** (typecheck + vitest + `pnpm audit`) is the only thing that type-checks prod code (the backend runs via `tsx` with no compile step). Full configs: `reference/supply-chain-and-ci.md`.
+- "Latest version" is explicitly **not** treated as "safe" — a fresh release is the dangerous case; the cooldown is the mitigation.
+
+### D15 — Frontend pinned to React 18 / Tailwind 3 (with a documented upgrade path)
+- The frontend targets **React 18.3 + Tailwind 3** deliberately, matched to the current local model's **late-2024 training cutoff** — a model with no React-19/Tailwind-4 patterns in training fights those stacks even with docs. React 18.3 / Tailwind 3 are maintained and not a security liability, so there's no urgency.
+- The full migration to **React 19 + Tailwind 4 + shadcn-latest** is specced in `UPGRADE-PATH-react19-tailwind4.md`; do it when running a model whose cutoff is ≥ mid-2025. The app logic (hooks, api, panels, mutation rule) is unaffected by that upgrade — only deps + Tailwind setup change.
 
 ---
 
@@ -114,7 +144,7 @@ Two *independent* mechanisms solving two *different* problems — do not merge t
                  │                          ├─ RunQueue (in-memory)    │
                  │                          └─ Playwright Chromium ×N  │
                  │                                   │                  │
-                 │                          Postgres 16 (sibling)      │
+                 │                          Postgres 18 (sibling)      │
                  │                          data volume: sessions/,    │
                  │                                       screenshots/  │
                  └─────────────────────────────────────────────────────┘
@@ -204,11 +234,13 @@ Six tables. Full Drizzle source: `reference/database-schema.md`.
 
 ## ⚑ Recommended improvements over the as-built version
 
-These are *my* recommendations as the senior engineer. They are **not** in the original build. Each phase file repeats the relevant one as a `⚑ RECOMMENDED` callout so you can decide per-phase. None are required for a working system; all are cheap wins.
+These are *my* recommendations as the senior engineer. Items 1, 2 (and the gitleaks + CI items) are now **ADOPTED into the baseline build** for the fresh rebuild; the rest remain optional per-phase callouts. None of the optional ones are required for a working system; all are cheap wins.
 
-1. **Structured logging (`pino`) instead of `console.log`.** The as-built backend logs with bare `console.log`. Swap in `pino` (+ `pino-http` for request logging with a `requestId`). Redact a fixed key list (`password`, `appPassword`, `otp`, `code`, `sid`, `APP_ENCRYPTION_KEY`). Low effort, big operability win, and it makes the "never log secrets" rule enforceable via the redaction config. *Introduce in Phase 0/1.*
+1. ✅ **ADOPTED — Structured logging (`pino`) instead of `console.log`.** `pino` (+ `pino-http` for request logging with a `requestId`) is in the dependency list and set up in Phase 0. Redact a fixed key list (`password`, `appPassword`, `gmailAppPassword`, `otp`, `code`, `sid`, `APP_ENCRYPTION_KEY`, `SESSION_SECRET`). Makes the "never log secrets" rule enforceable via the redaction config.
 
-2. **A `vitest` test track for pure functions.** The as-built repo has no tests. Add `vitest` and cover the brittle pure logic where a local LLM is most likely to introduce a subtle bug: `encryption` round-trip + version-byte rejection, `extractOtpCode` (prefers 5-digit, ignores long numbers), `timeToCronExpression`, `manilaDateString`/`isPhilippineHoliday`. "Write the test from the spec, then make it pass" gives the model a concrete success signal. *Introduce per phase as those functions are written.*
+2. ✅ **ADOPTED — A `vitest` test track for pure functions.** `vitest` is in the dep list + CI. Cover the brittle pure logic where a local LLM is most likely to introduce a subtle bug: `encryption` round-trip + version-byte rejection, `extractOtpCode` (prefers 5-digit, ignores long numbers), `timeToCronExpression`, `manilaDateString`/`isPhilippineHoliday`. "Write the test from the spec, then make it pass" gives the model a concrete success signal. *Add per phase as those functions are written.*
+
+   ✅ **ADOPTED — gitleaks pre-commit + minimal CI (typecheck/test/audit) + pnpm 11 supply-chain hardening.** See **D14** and `reference/supply-chain-and-ci.md`. These were "Phase 4 deferred" in the original roadmap; pulled to commit 1 because the tsx-no-compile choice makes the typecheck gate essential and the shai-hulud risk is live.
 
 3. **Pull email verification + password reset into Phase 4 properly (not "someday").** The roadmap defers these, but you're hosting real colleagues. Pick a transactional email provider (Resend is the simplest) and implement: verify-on-signup (single-use token, 24 h) and password reset (single-use token, 1 h, invalidates all sessions on use). Gate sensitive actions on `email_verified_at`. *Recommended before inviting >3 people.*
 

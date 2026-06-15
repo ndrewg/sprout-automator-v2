@@ -2,6 +2,8 @@
 
 Exact dependency versions and the full contents of every config file. The LLM should reproduce these **verbatim** — versions are pinned where a bump could change behavior (Playwright especially).
 
+> **Stack decisions locked for this build (June 2026):** Express **5**, PostgreSQL **18**, Playwright **1.60.0**, Node **22** (build stage), **pnpm 11** as the package manager (supply-chain hardening — see `reference/supply-chain-and-ci.md`), and **React 18 / Tailwind 3** on the frontend (matched to the current model's late-2024 cutoff; the jump to React 19 / Tailwind 4 is documented separately in `UPGRADE-PATH-react19-tailwind4.md`). Deploy target is a **4 GB** Hetzner CPX21.
+
 ---
 
 ## Repo layout (target)
@@ -13,10 +15,14 @@ sprout-automator/
 ├── Caddyfile                      # (Phase 5)
 ├── .env.example                   # committed; real .env is gitignored
 ├── .gitignore                     # must exclude .env, node_modules, data/, dist/, public/
+├── .pre-commit-config.yaml        # gitleaks hook (Phase 0; supply-chain ref)
+├── .github/workflows/ci.yml       # typecheck + test + audit (Phase 0; supply-chain ref)
 ├── DEPLOY.md
 └── app/
     ├── backend/
     │   ├── package.json
+    │   ├── pnpm-workspace.yaml     # pnpm 11 supply-chain settings (minimumReleaseAge, allowBuilds)
+    │   ├── pnpm-lock.yaml          # committed; installs use --frozen-lockfile
     │   ├── tsconfig.json
     │   ├── drizzle.config.ts
     │   ├── Dockerfile
@@ -24,6 +30,8 @@ sprout-automator/
     │   └── src/                   # see module layout in 02
     └── frontend/
         ├── package.json
+        ├── pnpm-workspace.yaml     # pnpm 11 supply-chain settings
+        ├── pnpm-lock.yaml
         ├── tsconfig.json
         ├── vite.config.ts
         ├── tailwind.config.js
@@ -46,10 +54,12 @@ The Docker **build context is `./app`** (so the Dockerfile sees `frontend/` and 
   "private": true,
   "type": "module",
   "main": "src/index.ts",
+  "packageManager": "pnpm@11.0.0",
   "scripts": {
     "dev": "tsx watch --env-file=../../.env src/index.ts",
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:studio": "drizzle-kit studio"
@@ -59,34 +69,40 @@ The Docker **build context is `./app`** (so the Dockerfile sees `frontend/` and 
     "cookie-parser": "^1.4.7",
     "date-holidays": "^3.23.12",
     "drizzle-orm": "^0.36.0",
-    "express": "^4.21.0",
+    "express": "^5.1.0",
     "express-rate-limit": "^7.4.1",
     "helmet": "^8.0.0",
     "imapflow": "^1.3.3",
     "mailparser": "^3.7.2",
     "node-cron": "^3.0.3",
     "pg": "^8.13.0",
-    "playwright": "1.49.1",
+    "pino": "^9.5.0",
+    "pino-http": "^10.3.0",
+    "playwright": "1.60.0",
     "tsx": "^4.19.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/cookie-parser": "^1.4.7",
-    "@types/express": "^4.17.21",
+    "@types/express": "^5.0.0",
     "@types/mailparser": "^3.4.5",
-    "@types/node": "^20.14.0",
+    "@types/node": "^22.0.0",
     "@types/node-cron": "^3.0.11",
     "@types/pg": "^8.11.0",
     "drizzle-kit": "^0.28.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
   }
 }
 ```
 
 Notes:
-- **`playwright` is pinned exactly to `1.49.1`** (no caret). It must match the Playwright Docker base image tag `v1.49.1-noble`. If you bump one, bump both.
-- Express is intentionally **v4** (`^4.21`), not v5. The `@types/express` is `^4.17`.
-- ⚑ **RECOMMENDED additions:** `pino` + `pino-http` (structured logging), and dev deps `vitest` (tests). See `02` improvements 1 & 2. Add `"test": "vitest"` to scripts if you adopt them.
+- **`playwright` is pinned exactly to `1.60.0`** (no caret). It must match the Playwright Docker base image tag `v1.60.0-noble`. If you bump one, bump both.
+- **Express is v5** (`^5.1.0`), `@types/express` `^5.0.0`. Express 5 **awaits async route handlers and forwards rejected promises to the error middleware** — so a `throw` inside an `async` handler now reaches the global error handler (in Express 4 it would crash the process as an unhandled rejection). You still validate with Zod and respond explicitly; this just makes the "never throw across the boundary unhandled" rule actually hold. The catch-all SPA route uses a **regex** (not a `*` string), which is compatible with Express 5's routing changes.
+- **`pino` + `pino-http`** are now in (adopted improvement #1) — structured logging with a secret-redaction list. See `reference/supply-chain-and-ci.md` and `03` for the redaction keys.
+- **`vitest`** is in for the pure-function tests (adopted improvement #2).
+- **`@types/node` is `^22`** (Node 22 LTS).
+- This is installed with **pnpm**, not npm — see `reference/supply-chain-and-ci.md` for the `pnpm-workspace.yaml` (supply-chain settings) that lives next to this file, and `corepack enable pnpm` first.
 
 ## Backend `tsconfig.json` (exact)
 
@@ -130,26 +146,26 @@ export default defineConfig({
 });
 ```
 
-## Backend `Dockerfile` (exact)
+## Backend `Dockerfile` (exact — pnpm, Node 22, Playwright 1.60)
 
 ```dockerfile
-# Build context is ./app (one level up), so paths are frontend/* and backend/*.
-
-# Frontend build stage — produces ./public for the backend to serve.
-FROM node:20-alpine AS frontend
+# Build context is ./app. Frontend build stage → ./public for the backend.
+FROM node:22-alpine AS frontend
 WORKDIR /fe
-COPY frontend/package.json frontend/package-lock.json* ./
-RUN npm install
+RUN corepack enable pnpm
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
 COPY frontend ./
-RUN npm run build
+RUN pnpm build
 
-# Runtime stage — Playwright base image. We run TypeScript directly with tsx;
-# no separate compile step.
-FROM mcr.microsoft.com/playwright:v1.49.1-noble
+# Runtime — Playwright base image (tag MUST match the pinned playwright npm version).
+# We run TypeScript directly with tsx; no separate compile step.
+FROM mcr.microsoft.com/playwright:v1.60.0-noble
 WORKDIR /app
 ENV NODE_ENV=production
-COPY backend/package.json backend/package-lock.json* ./
-RUN npm install --omit=dev
+RUN corepack enable pnpm
+COPY backend/package.json backend/pnpm-lock.yaml backend/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile --prod
 COPY backend/tsconfig.json ./
 COPY backend/src ./src
 COPY backend/drizzle ./drizzle
@@ -160,8 +176,10 @@ RUN mkdir -p /app/data && chown -R pwuser:pwuser /app/data /app/public
 USER pwuser
 
 EXPOSE 3000
-CMD ["npx", "tsx", "src/index.ts"]
+CMD ["pnpm", "exec", "tsx", "src/index.ts"]
 ```
+
+> Note: `node:22-alpine` is fine for the frontend build **on Tailwind 3**. If you ever take the React 19 / **Tailwind 4** upgrade, switch this stage to `node:22-bookworm-slim` (v4's native engine has Alpine/musl friction) — see `UPGRADE-PATH-react19-tailwind4.md`.
 
 ---
 
@@ -170,7 +188,7 @@ CMD ["npx", "tsx", "src/index.ts"]
 ```yaml
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     container_name: sprout-postgres
     restart: unless-stopped
     environment:
@@ -303,6 +321,7 @@ export const config: AppConfig = loadConfig();
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "packageManager": "pnpm@11.0.0",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -337,8 +356,9 @@ export const config: AppConfig = loadConfig();
 ```
 
 Notes:
-- **React 18** (`^18.3`), Vite 5, **Tailwind 3** (`^3.4` — not v4). shadcn/ui components are vendored into `src/components/ui/` (see Phase 3), which is why there's no `shadcn` runtime dep — only its Radix/cva/clsx/tailwind-merge building blocks.
+- **React 18** (`^18.3`), Vite 5, **Tailwind 3** (`^3.4` — not v4). This is a **deliberate match to the current model's late-2024 training cutoff**, not a limitation of the design — see `UPGRADE-PATH-react19-tailwind4.md` for the move to React 19 / Tailwind 4 once you run a model with a ≥mid-2025 cutoff. shadcn/ui components are vendored into `src/components/ui/` (see Phase 3), which is why there's no `shadcn` runtime dep — only its Radix/cva/clsx/tailwind-merge building blocks.
 - `motion` (Framer Motion's successor package) powers the run-log expand animation. `lucide-react` for icons.
+- Installed with **pnpm** (`corepack enable pnpm`); a `pnpm-workspace.yaml` with supply-chain settings sits next to this file (see `reference/supply-chain-and-ci.md`).
 
 ## Frontend `vite.config.ts` (exact)
 
@@ -372,23 +392,25 @@ The proxy is what makes the dev loop work: the browser talks only to Vite (5173)
 
 ## Scaffold commands
 
+First, enable pnpm once (Node 22 ships Corepack): `corepack enable pnpm`.
+
 ### Backend (Phase 0)
 ```bash
 mkdir -p app/backend/src
 cd app/backend
-# create package.json, tsconfig.json (above), then:
-npm install
+# create package.json, tsconfig.json, pnpm-workspace.yaml (above + supply-chain ref), then:
+pnpm install
 # verify:
-npm run typecheck
+pnpm typecheck
 ```
 
 ### Frontend (Phase 3)
 ```bash
 cd app
-npm create vite@latest frontend -- --template react-ts
+pnpm create vite frontend --template react-ts
 cd frontend
-# replace package.json deps with the exact set above, then:
-npm install
+# replace package.json deps with the exact set above, add pnpm-workspace.yaml, then:
+pnpm install
 # Tailwind + shadcn setup is detailed in phase-3.
 ```
 
@@ -397,9 +419,9 @@ npm install
 # 1. Postgres only, in Docker (map container 5432 → host 5433 in .env)
 docker compose up -d postgres
 # 2. Backend, native, hot-reload (~1s restart on save)
-cd app/backend && npm run dev
+cd app/backend && pnpm dev
 # 3. Frontend, native, Vite HMR (instant, preserves React state)
-cd app/frontend && npm run dev
+cd app/frontend && pnpm dev
 # open http://localhost:5173  (NOT 3000)
 ```
 Stop dev servers with **Ctrl+C** (not the terminal's X) — `tsx watch` spawns a child `node` that can survive and hold port 3000. If you hit `EADDRINUSE :3000` (PowerShell):
@@ -410,7 +432,7 @@ Get-NetTCPConnection -LocalPort 3000 -State Listen | ForEach-Object { Stop-Proce
 ### Full production-like build
 ```bash
 docker compose up -d --build
-docker compose exec backend npm run db:migrate   # first time / when migrations change
-curl http://localhost:3000/health                 # {"status":"ok","db":"ok",...}
+docker compose exec backend pnpm db:migrate   # first time / when migrations change
+curl http://localhost:3000/health              # {"status":"ok","db":"ok",...}
 ```
 Rebuild the image only when deps, the Dockerfile, or you want to test the real bundled SPA.

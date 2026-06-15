@@ -23,9 +23,9 @@ Create, **verbatim from `reference/hrhub-automation-playbook.md`**:
 
 Do not modify selectors, the 1920×1080 viewport, the reload-after-OTP, or the fail-safe already-clocked guard. (See the invariants list in the playbook — they are load-bearing.)
 
-Install the Playwright browser binary for native dev: `npx playwright install chromium`. (In Docker the base image already has it.)
+Install the Playwright browser binary for native dev: `pnpm exec playwright install chromium`. (In Docker the base image already has it.)
 
-**Gate 2A:** `npm run typecheck` passes; nothing imports `playwright` outside `src/automation/`.
+**Gate 2A:** `pnpm typecheck` passes; nothing imports `playwright` outside `src/automation/`.
 
 ---
 
