@@ -12,6 +12,7 @@ import { logger } from "./lib/logger";
 import { db } from "./db/client";
 import { attachUser } from "./middleware/auth";
 import { authRouter } from "./routes/auth";
+import { credentialsRouter } from "./routes/credentials";
 
 const app = express();
 
@@ -38,6 +39,7 @@ app.use(cookieParser(config.SESSION_SECRET));
 app.use(attachUser);
 
 app.use("/auth", authRouter);
+app.use("/credentials", credentialsRouter);
 
 app.get("/health", async (_req: Request, res: Response) => {
   let dbStatus: "ok" | "down" = "down";
