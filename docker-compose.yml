@@ -10,7 +10,12 @@ services:
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - sprout-pgdata:/var/lib/postgresql/data
+      # postgres:18+ images store data in a version-specific subdirectory and
+      # expect the volume mounted at /var/lib/postgresql (NOT .../data, which the
+      # image now treats as an "unused mount" and refuses to start on).
+      # See docker-library/postgres PR #1259. The spec's doc-04 compose predates
+      # this pg18 change; everything else here is verbatim.
+      - sprout-pgdata:/var/lib/postgresql
     healthcheck:
       test:
         [

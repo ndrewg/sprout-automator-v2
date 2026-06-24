@@ -5,8 +5,10 @@ import express, {
   type NextFunction,
 } from "express";
 import { pinoHttp } from "pino-http";
+import { sql } from "drizzle-orm";
 import { config } from "./config";
 import { logger } from "./lib/logger";
+import { db } from "./db/client";
 
 const app = express();
 
@@ -30,13 +32,19 @@ app.use(
 
 app.use(express.json({ limit: "100kb" }));
 
-app.get("/health", (_req: Request, res: Response) => {
-  // No DB yet in Phase 0 — `db` becomes a real `select 1` probe in Phase 1.
+app.get("/health", async (_req: Request, res: Response) => {
+  let dbStatus: "ok" | "down" = "down";
+  try {
+    await db.execute(sql`select 1`);
+    dbStatus = "ok";
+  } catch (err: unknown) {
+    logger.error({ err }, "health DB check failed");
+  }
   res.json({
     status: "ok",
     service: "sprout-automator-backend",
     version: "0.0.0",
-    db: "ok",
+    db: dbStatus,
     timestamp: new Date().toISOString(),
   });
 });
