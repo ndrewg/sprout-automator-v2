@@ -5,10 +5,13 @@ import express, {
   type NextFunction,
 } from "express";
 import { pinoHttp } from "pino-http";
+import cookieParser from "cookie-parser";
 import { sql } from "drizzle-orm";
 import { config } from "./config";
 import { logger } from "./lib/logger";
 import { db } from "./db/client";
+import { attachUser } from "./middleware/auth";
+import { authRouter } from "./routes/auth";
 
 const app = express();
 
@@ -31,6 +34,10 @@ app.use(
 );
 
 app.use(express.json({ limit: "100kb" }));
+app.use(cookieParser(config.SESSION_SECRET));
+app.use(attachUser);
+
+app.use("/auth", authRouter);
 
 app.get("/health", async (_req: Request, res: Response) => {
   let dbStatus: "ok" | "down" = "down";
