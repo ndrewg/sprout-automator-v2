@@ -1,0 +1,57 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: sprout-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sprout}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sprout_dev_pw}
+      POSTGRES_DB: ${POSTGRES_DB:-sprout}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - sprout-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-sprout} -d ${POSTGRES_DB:-sprout}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - sprout-net
+
+  backend:
+    build:
+      context: ./app
+      dockerfile: ./backend/Dockerfile
+    container_name: sprout-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3000
+      DATABASE_URL: postgres://${POSTGRES_USER:-sprout}:${POSTGRES_PASSWORD:-sprout_dev_pw}@postgres:5432/${POSTGRES_DB:-sprout}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
+      SESSION_SECRET: ${SESSION_SECRET}
+      DATA_DIR: /app/data
+      SPROUT_URL: ${SPROUT_URL:-https://kmcsolutions.hrhub.ph/}
+      TZ: ${TZ:-Asia/Manila}
+    ports:
+      - "${BACKEND_PORT:-3000}:3000"
+    volumes:
+      - sprout-backend-data:/app/data
+    networks:
+      - sprout-net
+
+volumes:
+  sprout-pgdata:
+  sprout-backend-data:
+
+networks:
+  sprout-net:
+    driver: bridge

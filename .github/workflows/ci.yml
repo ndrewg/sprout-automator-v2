@@ -1,0 +1,25 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: app/backend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: corepack enable pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test          # vitest (the pure-fn tests)
+      - run: pnpm audit --audit-level=high
+  frontend:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: app/frontend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: corepack enable pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build         # tsc -b && vite build → catches type errors

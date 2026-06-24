@@ -1,0 +1,12 @@
+# Supply-chain settings (pnpm 11). No `packages:` key — this is a single package,
+# but pnpm still reads these settings from here.
+minimumReleaseAge: 1440          # minutes; only install versions ≥1 day old.
+                                  # Raise to 4320 (3 days) to be more conservative.
+minimumReleaseAgeExclude: []     # add a package here only if you must hotfix faster
+
+# strictDepBuilds is true by default: any dep build script not listed below FAILS
+# the install. Allow ONLY the trusted native/build deps we actually need.
+allowBuilds:
+  esbuild: true                  # tsx's engine downloads its platform binary
+  '@node-rs/argon2': true        # native napi binary
+  playwright: true               # browser download hook (no-op on the PW base image)
