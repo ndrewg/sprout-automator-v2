@@ -100,10 +100,23 @@ export async function verifyPassword(
 }
 ```
 
-The dummy hash used for timing-equalization on nonexistent users (in the login route):
+The dummy hash used for timing-equalization on nonexistent users (in the login route)
+**must be a REAL Argon2id hash computed with the same options** — compute it once at
+module load from a throwaway random secret:
+```ts
+import { randomBytes } from "node:crypto";
+// In routes/auth.ts:
+const dummyHashPromise: Promise<string> = hashPassword(
+  randomBytes(32).toString("hex"),
+);
+// no-such-user branch: await verifyPassword(await dummyHashPromise, password);
 ```
-$argon2id$v=19$m=19456,t=2,p=1$ + "a".repeat(22) + $ + "b".repeat(43)
-```
+> ⚠️ Do **NOT** hand-write a fake encoded hash (e.g. `$argon2id$v=19$m=19456,t=2,p=1$` +
+> `"a".repeat(22)` + `$` + `"b".repeat(43)`). `@node-rs/argon2` v2 rejects a structurally
+> invalid hash and `verify()` returns in ~3.5 ms instead of doing the ~14 ms memory-hard
+> work — which **reintroduces the timing side-channel** the dummy verify exists to remove.
+> A real hash makes `verify()` do full work, so login timing no longer reveals whether the
+> email exists. (Found & fixed during the Phase 1 build.)
 
 ---
 

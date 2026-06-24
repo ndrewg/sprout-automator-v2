@@ -1,6 +1,6 @@
 # Reference — Database Schema
 
-This is the complete, canonical Drizzle schema. **Reproduce `src/db/schema.ts` verbatim.** Then generate the migration from it (`pnpm db:generate -- --name init`), review the SQL, and commit both.
+This is the complete, canonical Drizzle schema. **Reproduce `src/db/schema.ts` verbatim.** Then generate the migration from it (`pnpm db:generate --name init` — no `--` separator on pnpm 11), review the SQL, and commit both.
 
 Attach this file to **Phase 1**.
 

@@ -101,7 +101,7 @@ Notes:
 - **`playwright` is pinned exactly to `1.60.0`** (no caret). It must match the Playwright Docker base image tag `v1.60.0-noble`. If you bump one, bump both.
 - **Express is v5** (`^5.1.0`), `@types/express` `^5.0.0`. Express 5 **awaits async route handlers and forwards rejected promises to the error middleware** — so a `throw` inside an `async` handler now reaches the global error handler (in Express 4 it would crash the process as an unhandled rejection). You still validate with Zod and respond explicitly; this just makes the "never throw across the boundary unhandled" rule actually hold. The catch-all SPA route uses a **regex** (not a `*` string), which is compatible with Express 5's routing changes.
 - **`pino` + `pino-http`** are now in (adopted improvement #1) — structured logging with a secret-redaction list. See `reference/supply-chain-and-ci.md` and `03` for the redaction keys.
-- **`vitest`** is in for the pure-function tests (adopted improvement #2).
+- **`vitest`** is in for the pure-function tests (adopted improvement #2). It needs a `vitest.config.ts` (below) that supplies a dummy `test.env`, because the modules under test import `config.ts`, which Zod-validates the env at import time — without it the tests (and the CI `pnpm test` step) fail with no real `.env`.
 - **`@types/node` is `^22`** (Node 22 LTS).
 - This is installed with **pnpm**, not npm — see `reference/supply-chain-and-ci.md` for the `pnpm-workspace.yaml` (supply-chain settings) that lives next to this file, and `corepack enable pnpm` first.
 
@@ -144,6 +144,27 @@ export default defineConfig({
   },
   strict: true,
   verbose: true,
+});
+```
+
+## Backend `vitest.config.ts` (exact — Phase 1)
+
+Required so the pure-function tests run without a real `.env`/database. `test.env`
+is supplied before modules load, satisfying `config.ts`'s Zod validation at import.
+These are dummies — never real secrets.
+
+```ts
+import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  test: {
+    env: {
+      NODE_ENV: "test",
+      APP_ENCRYPTION_KEY: "0".repeat(64),
+      SESSION_SECRET: "x".repeat(48),
+      DATABASE_URL: "postgres://test:test@localhost:5432/test",
+    },
+  },
 });
 ```
 
@@ -201,7 +222,11 @@ services:
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - sprout-pgdata:/var/lib/postgresql/data
+      # ⚠️ postgres:18+ stores data in a version-specific subdirectory and expects
+      # the volume mounted at /var/lib/postgresql (NOT .../data — the image now
+      # treats .../data as an "unused mount" and refuses to start). This differs
+      # from the pre-18 convention. See docker-library/postgres PR #1259.
+      - sprout-pgdata:/var/lib/postgresql
     healthcheck:
       test:
         [

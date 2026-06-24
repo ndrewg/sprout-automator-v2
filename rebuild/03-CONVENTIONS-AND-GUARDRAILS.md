@@ -116,7 +116,7 @@ Concrete consequences:
 ## Database rules
 
 - All feature queries go through Drizzle. The only raw SQL allowed is the `select 1` health check and migrations.
-- Schema changes: edit `src/db/schema.ts` → `pnpm db:generate -- --name <change>` → review generated SQL → `pnpm db:migrate`. **Never edit a committed migration.**
+- Schema changes: edit `src/db/schema.ts` → `pnpm db:generate --name <change>` → review generated SQL → `pnpm db:migrate`. **Never edit a committed migration.** (pnpm 11 forwards extra args to the script directly — do **not** insert a `--` separator, which pnpm 11 passes through literally and drizzle-kit rejects.)
 - Insert-as-`pending` then rely on the partial unique index for run gating. **Never** `SELECT WHERE running` then `INSERT`.
 
 ## Module ownership rules (enforced "only place that imports X")

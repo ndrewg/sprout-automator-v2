@@ -21,13 +21,16 @@
 1. Create `src/db/schema.ts`, `src/db/client.ts`, `src/db/migrate.ts` — **verbatim from `reference/database-schema.md`.**
 2. Generate the initial migration:
    ```bash
-   cd app/backend && pnpm db:generate -- --name init
+   cd app/backend && pnpm db:generate --name init   # NOT `-- --name`; pnpm 11 passes `--` through literally
    ```
+   (Requires `drizzle.config.ts` to exist — create it from `04` first; it isn't created in Phase 0.)
    Open the generated SQL in `app/backend/drizzle/` and **confirm** it contains:
    - `users_email_unique` on `lower(email)`
    - `runs_one_active_per_user` as a **partial** unique index with `WHERE status IN ('pending','running')`
    - the `ON DELETE CASCADE` / `SET NULL` FKs as specified
 3. Apply it: `pnpm db:migrate` → `[migrate] done`.
+   - The `db:migrate` script has no `--env-file`, so for the **native** dev loop run it as
+     `pnpm exec tsx --env-file=../../.env src/db/migrate.ts`. Inside Docker (`docker compose exec backend pnpm db:migrate`) the env is already injected, so the bare script is correct there.
 4. Wire the real DB health check into `index.ts`: `await db.execute(sql\`select 1\`)` in a try/catch → `db:"ok"|"down"`.
 
 **Gate 1A:** `pnpm db:migrate` succeeds; `/health` returns `db:"ok"`; the partial index exists (`docker compose exec postgres psql -U sprout -d sprout -c '\d runs'` shows the partial unique index).
