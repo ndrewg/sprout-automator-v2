@@ -13,6 +13,8 @@ import { db } from "./db/client";
 import { attachUser } from "./middleware/auth";
 import { authRouter } from "./routes/auth";
 import { credentialsRouter } from "./routes/credentials";
+import { runsRouter } from "./routes/runs";
+import { recoverOrphanedRuns } from "./services/run-queue";
 
 const app = express();
 
@@ -40,6 +42,7 @@ app.use(attachUser);
 
 app.use("/auth", authRouter);
 app.use("/credentials", credentialsRouter);
+app.use("/runs", runsRouter);
 
 app.get("/health", async (_req: Request, res: Response) => {
   let dbStatus: "ok" | "down" = "down";
@@ -65,9 +68,23 @@ app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
   res.status(500).json({ error: "Internal server error" });
 });
 
-app.listen(config.PORT, "0.0.0.0", () => {
-  logger.info(
-    { port: config.PORT, env: config.NODE_ENV },
-    "sprout-automator-backend listening",
-  );
+async function start(): Promise<void> {
+  // Any run left pending/running by a previous shutdown is orphaned — flip it
+  // to failure so the user (and the single-active-run guard) aren't stuck.
+  const recovered = await recoverOrphanedRuns();
+  if (recovered > 0) {
+    logger.info({ recovered }, "recovered orphaned runs from previous shutdown");
+  }
+
+  app.listen(config.PORT, "0.0.0.0", () => {
+    logger.info(
+      { port: config.PORT, env: config.NODE_ENV },
+      "sprout-automator-backend listening",
+    );
+  });
+}
+
+start().catch((err: unknown) => {
+  logger.error({ err }, "failed to start server");
+  process.exit(1);
 });
