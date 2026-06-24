@@ -1,10 +1,15 @@
 # Phase 3 — Dashboard (React + Vite + shadcn + TanStack Query)
 
-**Goal:** the SPA. Signup/login, then a dashboard with four panels: Schedule, Credentials (with the Gmail App Password walkthrough + Test connection), Run-now, and Run history (live status + OTP paste-in). Built so Express serves it from `./public` in production.
+**Goal:** the SPA. Signup/login, then a dashboard with four panels: Schedule, Credentials (with the Gmail App Password walkthrough + Test connection), Run-now, and Run history (live status + OTP paste-in). Built so Express serves it from `./public` in production. **It must be fully responsive — colleagues will use it on phones as well as desktop.**
 
 **Attach for this session:** `03-CONVENTIONS-AND-GUARDRAILS.md` (especially the ⭐ mutation rule), `04-STACK-SCAFFOLD-AND-CONFIG.md`, `reference/api-contract.md`, `reference/live-docs-and-mcp.md`.
 
 > 📡 **Live docs first (this phase is the most cutoff-sensitive).** Before writing any frontend setup, fetch current docs via Context7 for: **React 19** (types: `useRef`, `JSX`, children), **Tailwind CSS v4** (`@tailwindcss/vite`, `@import "tailwindcss"`, `@theme`), **shadcn/ui** (latest CLI: `init` + `add`, Tailwind-v4 mode), **@tanstack/react-query v5**, **Vite**. A pre-2025 model will otherwise emit Tailwind v3 config and React 18 idioms. See `reference/live-docs-and-mcp.md`. **Do not write Tailwind/shadcn setup from memory — fetch it.**
+
+> 🎨 **UI/UX — use the `ui-ux-pro-max` skill (design intelligence).** It's a Python-CLI skill; invoke it (or run `python <skill-dir>/scripts/search.py …`, where `<skill-dir>` is `~/.agents/skills/ui-ux-pro-max`). Two uses, both before/during the panels:
+> 1. **Design system (do once, first):** `… "SaaS dashboard internal attendance tool data-dense professional" --design-system --persist -p "Sprout Automator"` → writes `design-system/MASTER.md` (palette, fonts, style, spacing scale). Read it before writing UI; map its tokens into the Tailwind v4 `@theme` block.
+> 2. **Responsive review (our users are on phones):** `… "responsive breakpoint mobile tablet table form" --domain ux`. **Use only the `Platform: Web` rows:** mobile-first (Tailwind `md:/lg:/xl:`), test 320/375/414/768/1024/1440, `min-h-dvh` not `100vh`, wide tables → `overflow-x-auto` or card layout on mobile, reserve space to avoid CLS.
+> - **Skip** the skill's `--stack react-native` mode and its native-app-only rules (44pt touch, safe-area insets, haptics, VoiceOver) — we're a responsive web SPA. **Do keep** its universal a11y rules (contrast ≥4.5:1, visible focus rings, keyboard nav, real form labels). Complements the shadcn/ui MCP for component examples.
 
 Build in four sub-steps. **The mutation rule (D11 / §03) is the thing that broke last time — keep it in front of the model the whole phase.**
 
@@ -82,13 +87,16 @@ All panels follow the same pattern: a query hook for reads, local `useState` onl
 `useStartRun`. Two buttons ("Clock in now" / "Clock out now"), disabled while busy. `trigger(action)` async → `await startRun.mutateAsync(action)` in try/catch → "Run started." / error. (The runs query's adaptive polling then shows progress in RunsPanel.)
 
 ### RunsPanel
-`useRuns` + `useSubmitOtp`. A table of recent runs (action, a `StatusBadge`, started, finished, detail). Rows expand to show the timestamped `steps` timeline (use `motion` for the expand animation). If any run has `waitingForOtp`, show a warning Alert with an OTP `Input` + "Submit OTP" button → `submitOtpHandler` async → `await submitOtp.mutateAsync({runId, code})` in try/catch. Import the `Run` type from `@/api` (do not redefine it locally).
+`useRuns` + `useSubmitOtp`. A table of recent runs (action, a `StatusBadge`, started, finished, detail). Rows expand to show the timestamped `steps` timeline (use `motion` for the expand animation). If any run has `waitingForOtp`, show a warning Alert with an OTP `Input` + "Submit OTP" button → `submitOtpHandler` async → `await submitOtp.mutateAsync({runId, code})` in try/catch. Import the `Run` type from `@/api` (do not redefine it locally). **Responsive:** wrap the table in `overflow-x-auto` so it scrolls (not breaks) on phones — per the skill's `Platform: Web` table-handling rule.
+
+> **Responsive is a requirement, not a polish item** (colleagues use this on phones). Every panel: mobile-first, single-column stacking on small screens (the dashboard `max-w-*` container + grid collapses to one column), tap targets comfortable, `min-h-dvh` over `100vh`. Apply the skill's `Platform: Web` responsive rules from the 🎨 callout above.
 
 **Gate 3D (full UX, in the browser):**
 1. Save Sprout creds; set up a Gmail App Password via the walkthrough; **Test Gmail connection → success**.
 2. Save a schedule; toggle enable; the holiday banner logic renders.
 3. "Clock in now" → RunsPanel shows the run go pending→running→(success/skipped/failure) with the steps timeline filling in live (polling tightens to 1.5 s while active).
 4. If a run waits for OTP and IMAP is slow, the paste-in box appears and a submitted code is accepted.
+5. **Responsive check:** at **375px** (phone) and **768px** (tablet) — no horizontal scroll on the page, panels stack to one column, the runs table scrolls inside its own container, all controls tappable, nothing clipped. Then desktop (1440px). Run the skill's `--domain ux` responsive review as a final pass.
 
 ---
 

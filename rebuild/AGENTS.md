@@ -8,6 +8,7 @@ You are implementing the Sprout Automator from the spec in this `rebuild/` direc
 - Emit **complete files** (path heading + full contents). Never write "// rest unchanged".
 - If the spec is ambiguous or missing something, **stop and ask one specific question** — do not invent.
 - **Ignore any `_archive/`, `archive/`, or `reference-old/` directory.** It is stale prior-build code kept only for human reference, and it uses patterns this spec has **superseded** (e.g. `.js` import extensions, hardcoded holiday maps). Never read it to decide how to build, and never copy code out of it. The only source of truth is `rebuild/`.
+- **Phase 3 UI:** use the `ui-ux-pro-max` skill (design-system + `Platform: Web` UX/responsive guidelines) — phase-3 says how. The dashboard must be **responsive** (used on phones); apply the skill's `Platform: Web` rules and **skip** its React-Native / native-app-only rules (44pt touch, safe-area, haptics, VoiceOver).
 
 ## Commit strategy
 - **Commit at every green Verification Gate** (the sub-steps: 1A, 2B, 3C, …), not once per phase. Each gate is a verified, safe rollback point.
