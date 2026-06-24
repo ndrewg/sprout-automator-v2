@@ -14,7 +14,9 @@ import { attachUser } from "./middleware/auth";
 import { authRouter } from "./routes/auth";
 import { credentialsRouter } from "./routes/credentials";
 import { runsRouter } from "./routes/runs";
+import { scheduleRouter } from "./routes/schedule";
 import { recoverOrphanedRuns } from "./services/run-queue";
+import { loadAllSchedules } from "./services/scheduler";
 
 const app = express();
 
@@ -43,6 +45,7 @@ app.use(attachUser);
 app.use("/auth", authRouter);
 app.use("/credentials", credentialsRouter);
 app.use("/runs", runsRouter);
+app.use("/schedule", scheduleRouter);
 
 app.get("/health", async (_req: Request, res: Response) => {
   let dbStatus: "ok" | "down" = "down";
@@ -75,6 +78,10 @@ async function start(): Promise<void> {
   if (recovered > 0) {
     logger.info({ recovered }, "recovered orphaned runs from previous shutdown");
   }
+
+  // Rehydrate enabled schedules from the DB into the in-process cron scheduler.
+  const scheduleCount = await loadAllSchedules();
+  logger.info({ scheduleCount }, "loaded schedules from database");
 
   app.listen(config.PORT, "0.0.0.0", () => {
     logger.info(
