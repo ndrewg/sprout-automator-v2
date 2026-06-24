@@ -2,7 +2,9 @@
 
 **Goal:** Postgres schema + migrations; signup/login/logout/me with Argon2id + DB-backed signed-cookie sessions; per-user AES-256-GCM credential storage with the partial-update contract. This is the security spine — build it exactly.
 
-**Attach for this session:** `03-CONVENTIONS-AND-GUARDRAILS.md`, `reference/database-schema.md`, `reference/crypto-and-otp-specs.md`, `reference/api-contract.md`.
+**Attach for this session:** `03-CONVENTIONS-AND-GUARDRAILS.md`, `reference/database-schema.md`, `reference/crypto-and-otp-specs.md`, `reference/api-contract.md`, `reference/live-docs-and-mcp.md`.
+
+> 📡 **Fetch live docs first (Context7):** Drizzle ORM + drizzle-kit (current schema DSL, indexes, migrate), Zod, @node-rs/argon2, cookie-parser under Express 5. The reference files' code is verbatim-correct; fetch docs for anything outside them.
 
 **Build in three sub-steps, each with its own gate.** Feed them one at a time if the model strains.
 

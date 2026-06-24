@@ -2,7 +2,9 @@
 
 Exact dependency versions and the full contents of every config file. The LLM should reproduce these **verbatim** — versions are pinned where a bump could change behavior (Playwright especially).
 
-> **Stack decisions locked for this build (June 2026):** Express **5**, PostgreSQL **18**, Playwright **1.60.0**, Node **22** (build stage), **pnpm 11** as the package manager (supply-chain hardening — see `reference/supply-chain-and-ci.md`), and **React 18 / Tailwind 3** on the frontend (matched to the current model's late-2024 cutoff; the jump to React 19 / Tailwind 4 is documented separately in `UPGRADE-PATH-react19-tailwind4.md`). Deploy target is a **4 GB** Hetzner CPX21.
+> **Stack decisions locked for this build (June 2026) — LATEST across the board:** Express **5**, PostgreSQL **18**, Playwright **1.60.0**, Node **22**, **pnpm 11** (supply-chain hardening — `reference/supply-chain-and-ci.md`), and the **latest frontend**: **React 19 + Tailwind CSS v4 + shadcn-latest + Vite 6 + TanStack Query v5**. Deploy target is a **4 GB** Hetzner CPX21.
+>
+> ⚠️ **Most of this stack is post-cutoff for a late-2024 local model.** The model must **fetch current docs at build time via Context7 (MCP)** rather than emit remembered (stale) APIs — this is how we run the latest stack on an older model. See `reference/live-docs-and-mcp.md`; it's attached to every phase.
 
 ---
 
@@ -33,12 +35,11 @@ sprout-automator/
         ├── pnpm-workspace.yaml     # pnpm 11 supply-chain settings
         ├── pnpm-lock.yaml
         ├── tsconfig.json
-        ├── vite.config.ts
-        ├── tailwind.config.js
-        ├── postcss.config.js
-        ├── components.json        # shadcn config
+        ├── vite.config.ts          # includes @tailwindcss/vite (Tailwind v4)
+        ├── components.json         # shadcn config (written by `shadcn init`)
         ├── index.html
         └── src/
+            └── index.css           # Tailwind v4: @import "tailwindcss" + @theme (NO tailwind.config.js / postcss.config.js)
 ```
 
 The Docker **build context is `./app`** (so the Dockerfile sees `frontend/` and `backend/`).
@@ -150,7 +151,9 @@ export default defineConfig({
 
 ```dockerfile
 # Build context is ./app. Frontend build stage → ./public for the backend.
-FROM node:22-alpine AS frontend
+# Debian (bookworm-slim), NOT alpine: Tailwind v4's native engine (Oxide/
+# lightningcss) has musl/alpine friction — glibc avoids it.
+FROM node:22-bookworm-slim AS frontend
 WORKDIR /fe
 RUN corepack enable pnpm
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
@@ -179,7 +182,7 @@ EXPOSE 3000
 CMD ["pnpm", "exec", "tsx", "src/index.ts"]
 ```
 
-> Note: `node:22-alpine` is fine for the frontend build **on Tailwind 3**. If you ever take the React 19 / **Tailwind 4** upgrade, switch this stage to `node:22-bookworm-slim` (v4's native engine has Alpine/musl friction) — see `UPGRADE-PATH-react19-tailwind4.md`.
+> Note: the frontend build stage is **Debian** (`node:22-bookworm-slim`), not Alpine, because Tailwind v4's native engine (Oxide/lightningcss) has musl friction on Alpine. The runtime stage is the Playwright Debian image already.
 
 ---
 
@@ -313,7 +316,9 @@ export const config: AppConfig = loadConfig();
 
 ---
 
-## Frontend `package.json` (exact)
+## Frontend `package.json` (target libraries — let the CLI pin exact versions)
+
+> The frontend is the **latest** stack: **React 19, Tailwind CSS v4, shadcn-latest, Vite 6, TanStack Query v5**. These are all **post-cutoff** for a late-2024 local model, so **do not trust version numbers or setup from memory** — scaffold with the tools (Vite template + `pnpm dlx shadcn@latest init`) and **fetch current docs via Context7** (`reference/live-docs-and-mcp.md`) before writing. The set below is the target shape; the Vite template and shadcn CLI establish exact current versions.
 
 ```json
 {
@@ -328,36 +333,33 @@ export const config: AppConfig = loadConfig();
     "preview": "vite preview"
   },
   "dependencies": {
-    "@radix-ui/react-checkbox": "^1.3.3",
-    "@radix-ui/react-label": "^2.1.8",
-    "@radix-ui/react-slot": "^1.2.4",
-    "@tanstack/react-query": "^5.100.14",
-    "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
-    "lucide-react": "^1.16.0",
-    "motion": "^12.40.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "tailwind-merge": "^3.6.0",
-    "tailwindcss-animate": "^1.0.7"
+    "@tanstack/react-query": "^5",
+    "class-variance-authority": "^0.7",
+    "clsx": "^2",
+    "lucide-react": "latest",
+    "motion": "^12",
+    "react": "^19",
+    "react-dom": "^19",
+    "tailwind-merge": "^3"
   },
   "devDependencies": {
-    "@types/node": "^25.9.1",
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
-    "@vitejs/plugin-react": "^4.3.4",
-    "autoprefixer": "^10.4.20",
-    "postcss": "^8.4.49",
-    "tailwindcss": "^3.4.15",
-    "typescript": "^5.6.0",
-    "vite": "^5.4.11"
+    "@tailwindcss/vite": "^4",
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^4",
+    "tailwindcss": "^4",
+    "tw-animate-css": "latest",
+    "typescript": "^5.6",
+    "vite": "^6"
   }
 }
 ```
 
-Notes:
-- **React 18** (`^18.3`), Vite 5, **Tailwind 3** (`^3.4` — not v4). This is a **deliberate match to the current model's late-2024 training cutoff**, not a limitation of the design — see `UPGRADE-PATH-react19-tailwind4.md` for the move to React 19 / Tailwind 4 once you run a model with a ≥mid-2025 cutoff. shadcn/ui components are vendored into `src/components/ui/` (see Phase 3), which is why there's no `shadcn` runtime dep — only its Radix/cva/clsx/tailwind-merge building blocks.
-- `motion` (Framer Motion's successor package) powers the run-log expand animation. `lucide-react` for icons.
+Notes (each is a thing a pre-2025 model gets wrong — verify via Context7 first):
+- **Tailwind v4 is CSS-first:** no `postcss.config.js`, no `autoprefixer`, **no `tailwind.config.js`**. It's the `@tailwindcss/vite` plugin + `@import "tailwindcss"` + `@theme` in CSS. The animate plugin is **`tw-animate-css`** (v4's replacement for the v3-era `tailwindcss-animate`).
+- **Radix UI deps are intentionally NOT listed** — `pnpm dlx shadcn@latest add <component>` installs the correct React-19-compatible Radix packages and writes them into `package.json`. Let the CLI own those.
+- `motion` powers the run-log expand animation; `lucide-react` for icons.
 - Installed with **pnpm** (`corepack enable pnpm`); a `pnpm-workspace.yaml` with supply-chain settings sits next to this file (see `reference/supply-chain-and-ci.md`).
 
 ## Frontend `vite.config.ts` (exact)
@@ -365,10 +367,11 @@ Notes:
 ```ts
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()], // @tailwindcss/vite is Tailwind v4's setup (no postcss)
   resolve: {
     alias: { "@": path.resolve(__dirname, "./src") },
   },

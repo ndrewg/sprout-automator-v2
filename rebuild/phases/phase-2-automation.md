@@ -2,7 +2,9 @@
 
 **Goal:** the whole automation engine — Playwright clock-in/out, the run queue with DB race protection, IMAP OTP (racing manual fallback), the node-cron scheduler, and the PH holiday skip. After this phase the backend is feature-complete; only the UI remains.
 
-**Attach for this session:** `03-CONVENTIONS-AND-GUARDRAILS.md`, `reference/hrhub-automation-playbook.md`, `reference/crypto-and-otp-specs.md`, `reference/api-contract.md`, `reference/database-schema.md`.
+**Attach for this session:** `03-CONVENTIONS-AND-GUARDRAILS.md`, `reference/hrhub-automation-playbook.md`, `reference/crypto-and-otp-specs.md`, `reference/api-contract.md`, `reference/database-schema.md`, `reference/live-docs-and-mcp.md`.
+
+> 📡 **Fetch live docs first (Context7):** Playwright 1.60 (locators, `storageState`, `chromium.launch`), imapflow, mailparser, node-cron, date-holidays. Reproduce the playbook's automation modules verbatim; fetch docs for API details you're unsure of.
 
 This is the biggest phase. Build in five sub-steps, each gated. **Feed them one at a time.**
 

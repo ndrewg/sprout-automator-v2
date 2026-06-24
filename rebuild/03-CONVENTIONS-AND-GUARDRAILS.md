@@ -79,7 +79,8 @@ Everything else is `await` + `try/catch`. If you're tempted to write `.then()` a
 ## Package manager & stack
 
 - **pnpm 11** (not npm), via Corepack. Commands: `pnpm install` / `pnpm dev` / `pnpm typecheck` / `pnpm db:migrate`; reproducible installs use `pnpm install --frozen-lockfile`. Supply-chain settings (`minimumReleaseAge`, `allowBuilds`) live in `pnpm-workspace.yaml`; `pnpm-lock.yaml` is committed. See `reference/supply-chain-and-ci.md`.
-- Stack: **Express 5, PostgreSQL 18, Playwright 1.60, Node 22**, frontend **React 18 / Tailwind 3** (the React 19 / Tailwind 4 jump is a separate, documented upgrade — don't introduce it ad hoc).
+- Stack is **LATEST**: **Express 5, PostgreSQL 18, Playwright 1.60, Node 22**, frontend **React 19 + Tailwind 4 + shadcn-latest + Vite 6 + TanStack Query v5**. Tailwind v4 is CSS-first (no `tailwind.config.js`/postcss); scaffold shadcn components with the `shadcn@latest` CLI.
+- **📡 Fetch live docs for post-cutoff libraries** (React 19, Tailwind 4, shadcn, Express 5, Drizzle, Zod, Playwright 1.60, pnpm 11, TanStack Query v5) via the Context7 MCP before writing that code — don't emit remembered/stale APIs. Docs beat memory. See `reference/live-docs-and-mcp.md`. The pinned `reference/*` code stays verbatim.
 - Adding a dependency is adding supply-chain surface — don't do it casually. A new dep that needs a build script must be allow-listed in `pnpm-workspace.yaml` (`allowBuilds`), deliberately.
 
 ## Error handling (HTTP boundary)

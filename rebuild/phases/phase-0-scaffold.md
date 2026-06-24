@@ -2,7 +2,9 @@
 
 **Goal:** a runnable Express + TypeScript backend that validates its env, exposes `/health`, and a Docker Compose file with Postgres. No features yet — just the skeleton everything else hangs on.
 
-**Attach for this session:** `03-CONVENTIONS-AND-GUARDRAILS.md`, `04-STACK-SCAFFOLD-AND-CONFIG.md`, `reference/supply-chain-and-ci.md`.
+**Attach for this session:** `03-CONVENTIONS-AND-GUARDRAILS.md`, `04-STACK-SCAFFOLD-AND-CONFIG.md`, `reference/supply-chain-and-ci.md`, `reference/live-docs-and-mcp.md`.
+
+> 📡 **Fetch live docs first (Context7):** pnpm 11 (`allowBuilds`, `minimumReleaseAge`, `pnpm-workspace.yaml`), Express 5 (app setup + async error handling), pino/pino-http, tsx. Don't write these from memory — they're post-cutoff. See `reference/live-docs-and-mcp.md`.
 
 **Prerequisite checks:** Node **22+**, Docker, Docker Compose installed. Enable pnpm once: `corepack enable pnpm` (then `pnpm --version` → 11.x).
 

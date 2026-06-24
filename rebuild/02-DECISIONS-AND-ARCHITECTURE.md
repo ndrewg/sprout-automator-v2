@@ -16,7 +16,7 @@ A review before the fresh build updated several version/tech choices. The *archi
 - **Node 22** for the frontend build stage (was 20).
 - **pnpm 11** as the package manager (was npm), for supply-chain hardening — script-blocking (`allowBuilds`) + release cooldown (`minimumReleaseAge`). See **D14** and `reference/supply-chain-and-ci.md`.
 - **gitleaks pre-commit + minimal CI** (typecheck/test/audit) from commit 1 — adopted, not deferred (see improvements list at the end; the tsx-no-compile choice makes the typecheck gate essential).
-- **Frontend stays React 18 / Tailwind 3** deliberately — matched to the current local model's late-2024 training cutoff. The migration to React 19 / Tailwind 4 is fully specced in `UPGRADE-PATH-react19-tailwind4.md` for when a newer-cutoff model is in use. See **D15**.
+- **Frontend is the LATEST stack: React 19 + Tailwind 4 + shadcn-latest + Vite 6 + TanStack Query v5.** The local model's late-2024 cutoff is bridged by a **live-docs MCP (Context7)** — the model fetches current API docs at build time instead of relying on stale training. See **D15** and **D16** + `reference/live-docs-and-mcp.md`.
 - **Deploy target is now Hetzner CPX21 (4 GB)** not CPX11 (2 GB) — headroom for 3 concurrent Chromiums. See **D12**.
 
 Everything else below stands. Where a decision names an old version, the value above wins.
@@ -126,9 +126,15 @@ Two *independent* mechanisms solving two *different* problems — do not merge t
 - **gitleaks** pre-commit hook blocks secret commits; a **minimal CI** (typecheck + vitest + `pnpm audit`) is the only thing that type-checks prod code (the backend runs via `tsx` with no compile step). Full configs: `reference/supply-chain-and-ci.md`.
 - "Latest version" is explicitly **not** treated as "safe" — a fresh release is the dangerous case; the cooldown is the mitigation.
 
-### D15 — Frontend pinned to React 18 / Tailwind 3 (with a documented upgrade path)
-- The frontend targets **React 18.3 + Tailwind 3** deliberately, matched to the current local model's **late-2024 training cutoff** — a model with no React-19/Tailwind-4 patterns in training fights those stacks even with docs. React 18.3 / Tailwind 3 are maintained and not a security liability, so there's no urgency.
-- The full migration to **React 19 + Tailwind 4 + shadcn-latest** is specced in `UPGRADE-PATH-react19-tailwind4.md`; do it when running a model whose cutoff is ≥ mid-2025. The app logic (hooks, api, panels, mutation rule) is unaffected by that upgrade — only deps + Tailwind setup change.
+### D15 — Frontend is the latest stack (React 19 / Tailwind 4 / shadcn-latest)
+- The frontend targets **React 19, Tailwind CSS v4, shadcn-latest, Vite 6, TanStack Query v5** — current, not pinned-to-old.
+- Earlier this was pinned to React 18 / Tailwind 3 to match the local model's late-2024 cutoff. That was reversed in favor of **D16 (live docs)**: rather than ship aging libraries, we run the current stack and supply the model's missing knowledge just-in-time via Context7. Net: latest stack *and* the existing local model.
+- **Lean on the CLIs:** the Vite template + `shadcn@latest` CLI emit React-19 / Tailwind-v4-correct code (CSS-first `@theme`, `data-slot`, correct Radix versions), so the model generates less framework code from memory. Tailwind v4 has **no `tailwind.config.js`/postcss**; the frontend Docker build stage is **Debian** (`node:22-bookworm-slim`), not Alpine, for v4's native engine.
+
+### D16 — Bridge the model's training cutoff with a live-docs MCP (Context7)
+- The whole stack (React 19, Tailwind 4, Express 5, pnpm 11, PG 18, Playwright 1.60, shadcn-latest) is **post-cutoff** for a late-2024 local model. Instead of downgrading the stack, the model is given a **live-documentation MCP — Context7** (`resolve-library-id` → `get-library-docs`) — and a standing rule: **for any post-cutoff library, fetch current docs before writing; never emit a remembered API.** Setup + per-phase fetch list + fallbacks (WebFetch, `llms.txt`, last-resort React-18/TW3) are in `reference/live-docs-and-mcp.md`.
+- This is the load-bearing decision that lets the latest stack (D1, D13, D14, D15) run on the user's existing model, and it future-proofs: the next major is a docs fetch, not a model upgrade.
+- The pinned reference code (`reference/*`) stays authoritative — the model reproduces it verbatim; live docs cover everything else.
 
 ---
 

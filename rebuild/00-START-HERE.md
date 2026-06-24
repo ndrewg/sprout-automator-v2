@@ -61,10 +61,11 @@ What that setup means for *how* you run these phases:
 
 ### Driving this with opencode
 
-opencode loads project rules from **`AGENTS.md`** files (it reads them at the project root and merges nested ones). Two things make the rebuild reliable through opencode:
+opencode loads project rules from **`AGENTS.md`** files (it reads them at the project root and merges nested ones). Three things make the rebuild reliable through opencode:
 
-1. **Use `rebuild/AGENTS.md` as the always-on rules file.** It's a compact digest of the conventions + the DO-NOT list + the async rule, written so opencode injects it into every turn automatically. When you run a rebuild session, work with your cwd at `rebuild/` (or copy its contents into the repo-root `AGENTS.md`) so opencode always has the guardrails in context — you then only need to *attach the phase file* for that session.
-2. **One phase per opencode session; gate before advancing.** Start a fresh session per phase, point it at the single `phases/phase-N-*.md`, let it implement, then run that phase's **Verification Gate**. Don't let opencode roam the whole repo per turn — the decomposition is what keeps the model from drifting. If a phase is too big in one go, feed its numbered sub-steps (e.g. `2A`, `2B`, …) as separate turns.
+1. **Use `rebuild/AGENTS.md` as the always-on rules file.** It's a compact digest of the conventions + the DO-NOT list + the async rule + the live-docs rule, written so opencode injects it into every turn automatically. When you run a rebuild session, work with your cwd at `rebuild/` (or copy its contents into the repo-root `AGENTS.md`) so opencode always has the guardrails in context — you then only need to *attach the phase file* for that session.
+2. **Add the Context7 docs MCP — this is what lets a late-2024 model build the latest stack.** In `opencode.json` add a `mcp` entry for Context7 (hosted `https://mcp.context7.com/mcp` or local `npx -y @upstash/context7-mcp`). Then the model can fetch current React 19 / Tailwind 4 / Express 5 / shadcn / Drizzle / pnpm docs on demand instead of emitting stale APIs from memory. Exact config + the per-phase fetch list are in `reference/live-docs-and-mcp.md`. **Set this up before Phase 0.**
+3. **One phase per opencode session; gate before advancing.** Start a fresh session per phase, point it at the single `phases/phase-N-*.md`, let it implement, then run that phase's **Verification Gate**. Don't let opencode roam the whole repo per turn — the decomposition is what keeps the model from drifting. If a phase is too big in one go, feed its numbered sub-steps (e.g. `2A`, `2B`, …) as separate turns.
 
 > If you ever want a second opinion on a tricky multi-file step, a coder-tuned sibling (e.g. Qwen3-Coder-30B-A3B-Instruct) can be swapped in for that session — but it's optional. Your current model handles these phases fine given the spec does the heavy lifting.
 
@@ -99,9 +100,7 @@ Read the foundation docs in order once, then work the phases.
 - [`reference/hrhub-automation-playbook.md`](./reference/hrhub-automation-playbook.md)
 - [`reference/crypto-and-otp-specs.md`](./reference/crypto-and-otp-specs.md)
 - [`reference/supply-chain-and-ci.md`](./reference/supply-chain-and-ci.md) — pnpm 11 hardening, gitleaks, CI (attach to Phase 0)
-
-**Upgrade path (not part of the baseline build — do later):**
-- [`UPGRADE-PATH-react19-tailwind4.md`](./UPGRADE-PATH-react19-tailwind4.md) — migrate the frontend to React 19 / Tailwind 4 once you run a model with a ≥mid-2025 cutoff.
+- [`reference/live-docs-and-mcp.md`](./reference/live-docs-and-mcp.md) — **Context7 MCP setup + the "fetch current docs, don't guess" rule. Attach to EVERY phase** (the stack is newer than the model's training).
 
 ---
 

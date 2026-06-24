@@ -2,7 +2,9 @@
 
 **Goal:** the SPA. Signup/login, then a dashboard with four panels: Schedule, Credentials (with the Gmail App Password walkthrough + Test connection), Run-now, and Run history (live status + OTP paste-in). Built so Express serves it from `./public` in production.
 
-**Attach for this session:** `03-CONVENTIONS-AND-GUARDRAILS.md` (especially the ⭐ mutation rule), `04-STACK-SCAFFOLD-AND-CONFIG.md`, `reference/api-contract.md`.
+**Attach for this session:** `03-CONVENTIONS-AND-GUARDRAILS.md` (especially the ⭐ mutation rule), `04-STACK-SCAFFOLD-AND-CONFIG.md`, `reference/api-contract.md`, `reference/live-docs-and-mcp.md`.
+
+> 📡 **Live docs first (this phase is the most cutoff-sensitive).** Before writing any frontend setup, fetch current docs via Context7 for: **React 19** (types: `useRef`, `JSX`, children), **Tailwind CSS v4** (`@tailwindcss/vite`, `@import "tailwindcss"`, `@theme`), **shadcn/ui** (latest CLI: `init` + `add`, Tailwind-v4 mode), **@tanstack/react-query v5**, **Vite**. A pre-2025 model will otherwise emit Tailwind v3 config and React 18 idioms. See `reference/live-docs-and-mcp.md`. **Do not write Tailwind/shadcn setup from memory — fetch it.**
 
 Build in four sub-steps. **The mutation rule (D11 / §03) is the thing that broke last time — keep it in front of the model the whole phase.**
 
@@ -16,16 +18,16 @@ Build in four sub-steps. **The mutation rule (D11 / §03) is the thing that brok
 
 ---
 
-## 3A — Scaffold the frontend
+## 3A — Scaffold the frontend (latest stack: React 19 + Tailwind 4 + shadcn-latest)
 
-1. `cd app && pnpm create vite frontend --template react-ts`.
-2. Replace `frontend/package.json` deps with the exact set in `04` (add `pnpm-workspace.yaml`); `pnpm install`.
-3. Tailwind 3: `pnpm dlx tailwindcss init -p` → configure `tailwind.config.js` `content: ["./index.html","./src/**/*.{ts,tsx}"]`, add the shadcn theme tokens (CSS variables) and `tailwindcss-animate` plugin. Add the shadcn base layer to `src/index.css` (`@tailwind base/components/utilities` + the `:root`/`.dark` HSL variables).
-4. `vite.config.ts` — verbatim from `04` (the `@`→`src` alias and the dev proxy are both required).
-5. `src/lib/utils.ts` → the standard shadcn `cn` helper (`clsx` + `tailwind-merge`).
-6. Vendor the shadcn components used into `src/components/ui/`: `button`, `card`, `input`, `label`, `badge`, `alert`, `checkbox`. (Generate via the shadcn CLI or paste the standard component sources — they depend only on the Radix/cva/clsx deps already installed. `alert` needs `success`/`warning`/`info`/`destructive` variants; `badge` needs `secondary`/`success`/`warning`/`info`/`destructive`.)
+Lean on the CLIs — they emit React-19/Tailwind-v4-correct code so the model doesn't have to. **Fetch the current steps via Context7** (shadcn "install with Vite" + Tailwind v4 install) and follow *those*; the sequence below is the shape to expect:
 
-**Gate 3A:** `pnpm dev` serves a blank styled page at `http://localhost:5173`; Tailwind classes apply; no console errors.
+1. `cd app && pnpm create vite frontend --template react-ts`; add `pnpm-workspace.yaml` (supply-chain settings from `reference/supply-chain-and-ci.md`); `pnpm install`.
+2. **Tailwind v4 (NOT v3):** `pnpm add tailwindcss @tailwindcss/vite tw-animate-css`. Add the `@tailwindcss/vite` plugin to `vite.config.ts` (verbatim from `04` — alias + dev proxy + tailwind plugin all required). **No `tailwind.config.js`, no `postcss.config.js`, no `autoprefixer`.** In `src/index.css`: `@import "tailwindcss";` + `@import "tw-animate-css";` + the shadcn `@theme inline {…}` token block + `:root`/`.dark` design tokens (the shadcn init writes this — see step 3).
+3. **shadcn (latest CLI, Tailwind-v4 mode):** `pnpm dlx shadcn@latest init` → then `pnpm dlx shadcn@latest add button card input label badge alert checkbox`. The CLI writes `src/lib/utils.ts` (the `cn` helper), `src/components/ui/*` (with `data-slot` attributes, React-19/v4 correct), the theme CSS, and installs the correct React-19-compatible **Radix** deps into `package.json`. **Do not hand-paste components** — that's how v3/React-18 idioms sneak in.
+4. **Extend two generated variants** (shadcn defaults are minimal): `alert` ships only `default`/`destructive` — add `success`/`warning`/`info`; `badge` — add `secondary`/`success`/`warning`/`info`/`destructive`. Edit the generated `cva` maps in those two files.
+
+**Gate 3A:** `pnpm dev` serves a styled page at `http://localhost:5173`; Tailwind v4 classes apply; **no `tailwind.config.js` exists**; `pnpm build` (`tsc -b`) is clean under React 19 types; no console errors.
 
 ---
 

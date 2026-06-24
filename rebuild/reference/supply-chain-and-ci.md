@@ -69,7 +69,8 @@ allowBuilds:
 
 ```dockerfile
 # Build context is ./app. Frontend build stage → ./public for the backend.
-FROM node:22-alpine AS frontend
+# Debian, not alpine: Tailwind v4's native engine has musl friction on alpine.
+FROM node:22-bookworm-slim AS frontend
 WORKDIR /fe
 RUN corepack enable pnpm
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./

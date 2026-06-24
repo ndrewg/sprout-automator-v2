@@ -2,7 +2,9 @@
 
 **Goal:** get the stack onto a VPS behind TLS, with backups and a sane day-2 routine. The original `DEPLOY.md` is the long-form runbook; this phase is the spec for the deploy artifacts and the hardening checklist.
 
-**Attach for this session:** `04-STACK-SCAFFOLD-AND-CONFIG.md`.
+**Attach for this session:** `04-STACK-SCAFFOLD-AND-CONFIG.md`, `reference/supply-chain-and-ci.md`, `reference/live-docs-and-mcp.md`.
+
+> 📡 **Fetch live docs first (Context7):** Caddy v2 (Caddyfile, reverse_proxy, auto-TLS), Docker Compose (current spec), pnpm in Docker. Verify the prod Dockerfile/compose against current docs.
 
 **Phase 4A must be done before any real user signs up.** Phase 4B before inviting more than a couple of people.
 

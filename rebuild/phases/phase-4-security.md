@@ -2,7 +2,9 @@
 
 **Goal:** lock down the HTTP layer (this part is small and you do it as soon as you have routes), then implement the account-lifecycle security features that turn this from "works for me" into "safe to hand colleagues."
 
-**Attach for this session:** `03-CONVENTIONS-AND-GUARDRAILS.md`, `reference/api-contract.md`, `reference/database-schema.md`.
+**Attach for this session:** `03-CONVENTIONS-AND-GUARDRAILS.md`, `reference/api-contract.md`, `reference/database-schema.md`, `reference/live-docs-and-mcp.md`.
+
+> 📡 **Fetch live docs first (Context7):** helmet (current CSP API), express-rate-limit v7, and — if you do the 4B email flows — the chosen mail SDK (e.g. Resend).
 
 Split into **4A (essentials — do these the moment Phase 1 routes exist; they're cheap)** and **4B (lifecycle — do before inviting >3 people)**.
 
