@@ -23,6 +23,8 @@ This is the biggest phase. Build in five sub-steps, each gated. **Feed them one 
 Create, **verbatim from `reference/hrhub-automation-playbook.md`**:
 `src/lib/paths.ts`, `src/automation/screenshot.ts`, `src/automation/browser.ts`, `src/automation/portal.ts`, `src/automation/login.ts`, `src/automation/clock.ts`, `src/automation/runAutomation.ts`, and `src/automation/otp-bridge.ts` (from the crypto/OTP reference).
 
+> Also create **`src/lib/ph-holidays.ts` now** (verbatim from the crypto/OTP reference) — `clock.ts` imports `manilaDateString` from it, so 2A won't typecheck without it. It's a leaf module (only `date-holidays`); 2E just reuses it. Same pull-forward pattern as `imap-otp.ts` in 1C.
+
 Do not modify selectors, the 1920×1080 viewport, the reload-after-OTP, or the fail-safe already-clocked guard. (See the invariants list in the playbook — they are load-bearing.)
 
 Install the Playwright browser binary for native dev: `pnpm exec playwright install chromium`. (In Docker the base image already has it.)
@@ -36,6 +38,12 @@ Install the Playwright browser binary for native dev: `pnpm exec playwright inst
 Create:
 - `src/services/run-queue.ts` — the `RunQueue` class (in-memory FIFO, cap = `config.MAX_CONCURRENT_RUNS`, `setExecutor`/`enqueue`/`stats`/private `drain`) and `recoverOrphanedRuns()`. Export a singleton `runQueue`. Copy the structure from the spec below.
 - `src/services/runs.ts` — `startRun`, `executeQueuedRun`, `listRuns`, `getRun`, `isRunWaitingForOtp`, `submitRunOtp`, `appendRunStep`; and `runQueue.setExecutor(executeQueuedRun)` at module load.
+
+> **Pull `src/routes/runs.ts` + the `index.ts` startup wiring forward into 2B.** The 2B gate is an HTTP test (`POST /runs ×5`), so the route, its mount at `/runs`, the side-effect import of `./services/runs`, and `recoverOrphanedRuns()` at boot must exist now. None of that needs real creds — only 2D's *real end-to-end clock* does. (See 2D; treat its file-creation as done here, leaving only the live HRHub verification for 2D.)
+>
+> **Express 5 route params:** `req.params` values are typed `string | string[] | undefined` and `noPropertyAccessFromIndexSignature` forces bracket access — write `const id = req.params["id"]; if (typeof id !== "string") { 404 }` before using it.
+>
+> ⚠️ **Chromium IS installed here.** pnpm's `allowBuilds: playwright` runs Playwright's browser-download postinstall, so the spec's "with no Chromium installed they'll all fail fast" does NOT hold — an enqueued run will attempt **real** automation against the live portal. To keep the race test off real HRHub, run the backend with `SPROUT_URL` pointed at a dead local port (e.g. `http://127.0.0.1:9/`) so runs fail fast at navigation. The 1×202/4×409 split is decided at `startRun` (insert + 23505) regardless. For orphan recovery, insert a `running` row directly and restart.
 
 `run-queue.ts` (copy verbatim):
 ```ts
@@ -143,7 +151,7 @@ Create:
 `schedule.ts` rules (per contract):
 - `GET` returns the row or defaults (`05:30:00`/`18:05:00`, `enabled:false`, `configured:false`) plus `today:{date:manilaDateString(now), holiday:isPhilippineHoliday(now)}`.
 - `PUT` (`.strict()`, time regex, normalize `HH:MM`→`HH:MM:SS`) upserts, then **`registerSchedule(row)` if enabled else `unregisterSchedule(userId)`**, audits `schedule_updated`. Empty body → 400.
-- **Lazy opt-in:** never create a row except via PUT; never default `enabled:true` for a user without a row.
+- **Lazy opt-in:** never create a row except via PUT; never default `enabled:true` for a user without a row. ⚠️ The `schedules.enabled` column default is `true`, so on a **fresh insert** where the PUT omitted `enabled`, set `enabled: false` explicitly — otherwise the DB default silently auto-enables, violating lazy opt-in.
 
 In `index.ts` startup: `await loadAllSchedules()` and log the count.
 
