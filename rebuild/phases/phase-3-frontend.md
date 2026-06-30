@@ -41,6 +41,8 @@ Lean on the CLIs — they emit React-19/Tailwind-v4-correct code so the model do
 
 **Gate 3A:** `pnpm dev` serves a styled page at `http://localhost:5173`; Tailwind v4 classes apply; **no `tailwind.config.js` exists**; `pnpm build` (`tsc -b`) is clean under React 19 types; no console errors.
 
+> ⚠️ **Build-time corrections (found 2026-06):** the current Vite `react-ts` template is **Vite 8 + TS 6** (newer than doc 04's Vite 6 target) — let the CLI pin it. **TS 6 deprecates `baseUrl`**, so the shadcn `@/*` alias uses `paths` *without* `baseUrl` in `tsconfig.json` + `tsconfig.app.json` (paths resolve relative to the tsconfig). shadcn `init` flags: there is **no `--base-color`**; use `-b radix -p <preset> --pointer -y` (e.g. `-p nova`). The Badge/Alert `success`/`warning`/`info` status variants (step 4) are only consumed by the RunsPanel — fine to add in **3D** with that panel rather than here.
+
 ---
 
 ## 3B — Data layer (api + QueryClient + hooks)
