@@ -1,0 +1,5 @@
+minimumReleaseAge: 1440
+minimumReleaseAgeExclude: []
+allowBuilds:
+  esbuild: true                  # Vite's bundler
+  '@tailwindcss/oxide': true     # Tailwind v4 native engine
