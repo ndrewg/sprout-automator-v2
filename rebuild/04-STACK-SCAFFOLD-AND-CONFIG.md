@@ -153,6 +153,12 @@ Required so the pure-function tests run without a real `.env`/database. `test.en
 is supplied before modules load, satisfying `config.ts`'s Zod validation at import.
 These are dummies — never real secrets.
 
+> **Test layout:** put tests in a dedicated **`test/` folder mirroring `src/`**
+> (`test/lib/*.test.ts`, `test/services/*.test.ts`) rather than colocated next to
+> source, and add `"test/**/*"` to `tsconfig.json` `include` so `tsc --noEmit`
+> type-checks them (vitest discovers them regardless). Imports use relative paths
+> to `../../src/...` (no `@` alias on the backend).
+
 ```ts
 import { defineConfig } from "vitest/config";
 
