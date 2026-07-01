@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import express, {
   type Request,
   type Response,
@@ -63,6 +65,22 @@ app.get("/health", async (_req: Request, res: Response) => {
     timestamp: new Date().toISOString(),
   });
 });
+
+// Serve the built SPA (production). In dev this dir won't exist (Vite serves
+// the frontend); in the Docker image the frontend build stage lands here.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const publicDir = path.resolve(__dirname, "../public");
+app.use(express.static(publicDir));
+
+// SPA catch-all: any GET NOT under an API prefix serves index.html so client
+// routing works while the API stays reachable. Regex negative-lookahead
+// (Express 5 routing — not a "*" string).
+app.get(
+  /^\/(?!auth|credentials|schedule|runs|health)(?:.*)$/,
+  (_req: Request, res: Response) => {
+    res.sendFile(path.join(publicDir, "index.html"));
+  },
+);
 
 // Global error handler (backstop). Logs the error, responds with a generic
 // JSON 500, and never leaks a stack trace to the client.

@@ -1,0 +1,10 @@
+# Build context is ./app. Keep host-only / OS-specific artifacts out of the
+# image so installs run clean against each stage's own lockfile install.
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+backend/data
+backend/public
+frontend/.playwright-mcp
+**/*.log
