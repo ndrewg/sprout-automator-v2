@@ -40,6 +40,24 @@ node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 (If you don't have Node on the laptop, generate these on any machine — they're
 just random strings.)
 
+**The two secrets in `.env`:**
+
+| Var | What it is | Rotating it means… |
+|-----|-----------|--------------------|
+| `APP_ENCRYPTION_KEY` | 32-byte (64 hex) key that AES-256-GCM-encrypts stored Sprout/Gmail credentials | Existing stored credentials can no longer be decrypted — you must re-enter them |
+| `SESSION_SECRET` | signs the `sid` session cookie | Everyone is logged out (must sign in again) — harmless |
+
+- **Never commit these.** `.env` is gitignored on purpose; the pre-commit
+  gitleaks hook will also block an accidental secret commit. They exist only in
+  the local `.env` file (and injected into the container by Docker Compose).
+- **Moving to the laptop:** since `.env` doesn't travel with `git`, either
+  (a) **generate fresh secrets on the laptop** (simplest — you'll re-enter your
+  Sprout/Gmail creds in the UI because the DB is fresh too), or
+  (b) **copy your existing `.env` file directly** to the laptop over a secure
+  channel (USB, `scp`, password manager) if you also migrate the Postgres data
+  and want your saved credentials to keep working — the `APP_ENCRYPTION_KEY` must
+  match the data. Don't paste the values into chat, tickets, or committed files.
+
 > ⚠️ **APP_ENCRYPTION_KEY rule.** Stored Sprout/Gmail credentials are encrypted
 > with this key.
 > - **Fresh start on the laptop (recommended):** generate a NEW key. The database
