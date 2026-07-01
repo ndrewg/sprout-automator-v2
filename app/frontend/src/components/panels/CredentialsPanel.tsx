@@ -12,6 +12,12 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -21,9 +27,44 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { CircleCheck, HelpCircle, TriangleAlert } from "lucide-react";
+import { CircleCheck, Eye, EyeOff, HelpCircle, TriangleAlert } from "lucide-react";
+
+function RevealInput({
+  id,
+  value,
+  onChange,
+  placeholder,
+}: {
+  id: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <InputGroup>
+      <InputGroupInput
+        id={id}
+        type={show ? "text" : "password"}
+        autoComplete="off"
+        placeholder={placeholder}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <InputGroupAddon align="inline-end">
+        <InputGroupButton
+          type="button"
+          size="icon-xs"
+          aria-label={show ? "Hide" : "Show"}
+          onClick={() => setShow((s) => !s)}
+        >
+          {show ? <EyeOff /> : <Eye />}
+        </InputGroupButton>
+      </InputGroupAddon>
+    </InputGroup>
+  );
+}
 
 export function CredentialsPanel() {
   const { data, isLoading } = useCredentials();
@@ -34,8 +75,10 @@ export function CredentialsPanel() {
   const [sproutPassword, setSproutPassword] = useState("");
   const [gmailEmail, setGmailEmail] = useState("");
   const [gmailAppPassword, setGmailAppPassword] = useState("");
-  const [msg, setMsg] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [sproutMsg, setSproutMsg] = useState<string | null>(null);
+  const [gmailMsg, setGmailMsg] = useState<string | null>(null);
+  const [savingSprout, setSavingSprout] = useState(false);
+  const [savingGmail, setSavingGmail] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [testResult, setTestResult] = useState<
     { ok: true; count: number } | { ok: false; error: string } | null
@@ -48,33 +91,51 @@ export function CredentialsPanel() {
     }
   }, [data]);
 
-  const save = async () => {
-    setSaving(true);
-    setMsg(null);
+  const saveSprout = async () => {
+    setSavingSprout(true);
+    setSproutMsg(null);
     const patch: Record<string, string | null> = {};
     if (sproutUsername !== (data?.sproutUsername ?? "")) {
       patch.sproutUsername = sproutUsername ? sproutUsername : null;
     }
     if (sproutPassword) patch.sproutPassword = sproutPassword;
-    if (gmailEmail !== (data?.gmailEmail ?? "")) {
-      patch.gmailEmail = gmailEmail ? gmailEmail : null;
-    }
-    if (gmailAppPassword) patch.gmailAppPassword = gmailAppPassword;
-
     if (Object.keys(patch).length === 0) {
-      setMsg("No changes.");
-      setSaving(false);
+      setSproutMsg("No changes.");
+      setSavingSprout(false);
       return;
     }
     try {
       await update.mutateAsync(patch);
       setSproutPassword("");
-      setGmailAppPassword("");
-      setMsg("Credentials saved.");
+      setSproutMsg("Saved.");
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : String(e));
+      setSproutMsg(e instanceof Error ? e.message : String(e));
     } finally {
-      setSaving(false);
+      setSavingSprout(false);
+    }
+  };
+
+  const saveGmail = async () => {
+    setSavingGmail(true);
+    setGmailMsg(null);
+    const patch: Record<string, string | null> = {};
+    if (gmailEmail !== (data?.gmailEmail ?? "")) {
+      patch.gmailEmail = gmailEmail ? gmailEmail : null;
+    }
+    if (gmailAppPassword) patch.gmailAppPassword = gmailAppPassword;
+    if (Object.keys(patch).length === 0) {
+      setGmailMsg("No changes.");
+      setSavingGmail(false);
+      return;
+    }
+    try {
+      await update.mutateAsync(patch);
+      setGmailAppPassword("");
+      setGmailMsg("Saved.");
+    } catch (e) {
+      setGmailMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingGmail(false);
     }
   };
 
@@ -98,89 +159,110 @@ export function CredentialsPanel() {
   const testDisabled = testImap.isPending || !data?.gmailAppPasswordSet;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Credentials</CardTitle>
-        <CardDescription>
-          Stored encrypted. Passwords are never shown back to you.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-6">
-        {isLoading ? (
-          <Skeleton className="h-64 w-full" />
-        ) : (
-          <>
-            {/* Sprout */}
-            <FieldGroup>
-              <h3 className="text-sm font-medium">Sprout HRHub</h3>
-              <Field>
-                <FieldLabel htmlFor="sproutUsername">Username</FieldLabel>
-                <Input
-                  id="sproutUsername"
-                  autoComplete="off"
-                  value={sproutUsername}
-                  onChange={(e) => setSproutUsername(e.target.value)}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="sproutPassword">
-                  Password{" "}
-                  {data?.sproutPasswordSet ? (
-                    <Badge variant="success">set</Badge>
-                  ) : null}
-                </FieldLabel>
-                <Input
-                  id="sproutPassword"
-                  type="password"
-                  autoComplete="off"
-                  placeholder={
-                    data?.sproutPasswordSet ? "(unchanged)" : "Enter password"
-                  }
-                  value={sproutPassword}
-                  onChange={(e) => setSproutPassword(e.target.value)}
-                />
-              </Field>
-            </FieldGroup>
+    <div className="flex flex-col gap-6">
+      {/* Sprout HRHub card */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Sprout HRHub</CardTitle>
+          <CardDescription>
+            Your HRHub login, stored encrypted. Save applies to this card only.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          {isLoading ? (
+            <Skeleton className="h-40 w-full" />
+          ) : (
+            <>
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="sproutUsername">Username</FieldLabel>
+                  <Input
+                    id="sproutUsername"
+                    autoComplete="off"
+                    value={sproutUsername}
+                    onChange={(e) => setSproutUsername(e.target.value)}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="sproutPassword">
+                    Password{" "}
+                    {data?.sproutPasswordSet ? (
+                      <Badge variant="success">set</Badge>
+                    ) : null}
+                  </FieldLabel>
+                  <RevealInput
+                    id="sproutPassword"
+                    value={sproutPassword}
+                    onChange={setSproutPassword}
+                    placeholder={
+                      data?.sproutPasswordSet ? "(unchanged)" : "Enter password"
+                    }
+                  />
+                </Field>
+              </FieldGroup>
+              <div className="flex items-center gap-3">
+                <Button onClick={saveSprout} disabled={savingSprout}>
+                  {savingSprout ? "Saving…" : "Save Sprout credentials"}
+                </Button>
+                {sproutMsg ? (
+                  <span className="text-sm text-muted-foreground">
+                    {sproutMsg}
+                  </span>
+                ) : null}
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
 
-            <Separator />
-
-            {/* Gmail */}
-            <FieldGroup>
-              <h3 className="text-sm font-medium">Gmail (for OTP retrieval)</h3>
-              <Field>
-                <FieldLabel htmlFor="gmailEmail">Gmail address</FieldLabel>
-                <Input
-                  id="gmailEmail"
-                  type="email"
-                  autoComplete="off"
-                  value={gmailEmail}
-                  onChange={(e) => setGmailEmail(e.target.value)}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="gmailAppPassword">
-                  App password{" "}
-                  {data?.gmailAppPasswordSet ? (
-                    <Badge variant="success">set</Badge>
-                  ) : null}
-                </FieldLabel>
-                <Input
-                  id="gmailAppPassword"
-                  type="password"
-                  autoComplete="off"
-                  placeholder={
-                    data?.gmailAppPasswordSet
-                      ? "(unchanged)"
-                      : "abcd efgh ijkl mnop"
-                  }
-                  value={gmailAppPassword}
-                  onChange={(e) => setGmailAppPassword(e.target.value)}
-                />
-                <FieldDescription>
-                  Not your normal Google password — a 16-character App Password.
-                  Spaces are fine.
-                </FieldDescription>
-              </Field>
+      {/* Gmail card */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Gmail (for OTP retrieval)</CardTitle>
+          <CardDescription>
+            Used to read the one-time code during a run. Save applies to this
+            card only.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          {isLoading ? (
+            <Skeleton className="h-64 w-full" />
+          ) : (
+            <>
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="gmailEmail">Gmail address</FieldLabel>
+                  <Input
+                    id="gmailEmail"
+                    type="email"
+                    autoComplete="off"
+                    value={gmailEmail}
+                    onChange={(e) => setGmailEmail(e.target.value)}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="gmailAppPassword">
+                    App password{" "}
+                    {data?.gmailAppPasswordSet ? (
+                      <Badge variant="success">set</Badge>
+                    ) : null}
+                  </FieldLabel>
+                  <RevealInput
+                    id="gmailAppPassword"
+                    value={gmailAppPassword}
+                    onChange={setGmailAppPassword}
+                    placeholder={
+                      data?.gmailAppPasswordSet
+                        ? "(unchanged)"
+                        : "abcd efgh ijkl mnop"
+                    }
+                  />
+                  <FieldDescription>
+                    Not your normal Google password — a 16-character App
+                    Password. Spaces are fine.
+                  </FieldDescription>
+                </Field>
+              </FieldGroup>
 
               <Button
                 variant="link"
@@ -223,7 +305,7 @@ export function CredentialsPanel() {
                       <li>
                         Paste it above (spaces are stripped server-side), click{" "}
                         <strong>Test Gmail connection</strong>, then{" "}
-                        <strong>Save credentials</strong>.
+                        <strong>Save Gmail credentials</strong>.
                       </li>
                     </ol>
                   </AlertDescription>
@@ -242,11 +324,7 @@ export function CredentialsPanel() {
               ) : null}
 
               <div className="flex flex-wrap items-center gap-3">
-                <Button
-                  variant="outline"
-                  onClick={test}
-                  disabled={testDisabled}
-                >
+                <Button variant="outline" onClick={test} disabled={testDisabled}>
                   {testImap.isPending ? "Testing…" : "Test Gmail connection"}
                 </Button>
                 {!data?.gmailAppPasswordSet ? (
@@ -272,19 +350,21 @@ export function CredentialsPanel() {
                   <AlertDescription>{testResult.error}</AlertDescription>
                 </Alert>
               ) : null}
-            </FieldGroup>
 
-            <div className="flex items-center gap-3">
-              <Button onClick={save} disabled={saving}>
-                {saving ? "Saving…" : "Save credentials"}
-              </Button>
-              {msg ? (
-                <span className="text-sm text-muted-foreground">{msg}</span>
-              ) : null}
-            </div>
-          </>
-        )}
-      </CardContent>
-    </Card>
+              <div className="flex items-center gap-3">
+                <Button onClick={saveGmail} disabled={savingGmail}>
+                  {savingGmail ? "Saving…" : "Save Gmail credentials"}
+                </Button>
+                {gmailMsg ? (
+                  <span className="text-sm text-muted-foreground">
+                    {gmailMsg}
+                  </span>
+                ) : null}
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
