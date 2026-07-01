@@ -13,6 +13,7 @@ import { config } from "./config";
 import { logger } from "./lib/logger";
 import { db } from "./db/client";
 import { attachUser } from "./middleware/auth";
+import { securityHeaders, authLimiter, apiLimiter } from "./middleware/security";
 import { authRouter } from "./routes/auth";
 import { credentialsRouter } from "./routes/credentials";
 import { runsRouter } from "./routes/runs";
@@ -24,6 +25,9 @@ const app = express();
 
 // Behind a reverse proxy in production (Caddy, Phase 5).
 app.set("trust proxy", 1);
+
+// Strict security headers (CSP, HSTS, X-Frame-Options, …) on every response.
+app.use(securityHeaders);
 
 // Request logging with a per-request id. Secrets are redacted by the logger's
 // `redact` list (see lib/logger.ts).
@@ -52,6 +56,14 @@ app.use(
 app.use(express.json({ limit: "100kb" }));
 app.use(cookieParser(config.SESSION_SECRET));
 app.use(attachUser);
+
+// Rate limits (before the routers). Auth endpoints are strict; the
+// authenticated API is generous. /health is intentionally left unthrottled.
+app.use("/auth/login", authLimiter);
+app.use("/auth/signup", authLimiter);
+app.use("/credentials", apiLimiter);
+app.use("/schedule", apiLimiter);
+app.use("/runs", apiLimiter);
 
 app.use("/auth", authRouter);
 app.use("/credentials", credentialsRouter);
