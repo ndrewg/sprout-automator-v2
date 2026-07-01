@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { manilaDateString, isPhilippineHoliday } from "./ph-holidays";
+import {
+  manilaDateString,
+  isPhilippineHoliday,
+} from "../../src/lib/ph-holidays";
 
 describe("manilaDateString", () => {
   it("formats a UTC instant in Asia/Manila (+08)", () => {

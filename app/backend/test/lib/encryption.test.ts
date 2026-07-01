@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { encrypt, decrypt, encryptOptional, decryptOptional } from "./encryption";
+import {
+  encrypt,
+  decrypt,
+  encryptOptional,
+  decryptOptional,
+} from "../../src/lib/encryption";
 
 describe("encryption (AES-256-GCM)", () => {
   it("round-trips plaintext", () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { timeToCronExpression } from "./scheduler";
+import { timeToCronExpression } from "../../src/services/scheduler";
 
 describe("timeToCronExpression", () => {
   it("converts HH:MM / HH:MM:SS to a Mon–Fri cron expression", () => {
