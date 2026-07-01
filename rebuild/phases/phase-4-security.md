@@ -19,6 +19,8 @@ Split into **4A (essentials — do these the moment Phase 1 routes exist; they'r
 
 Create `src/middleware/security.ts`:
 - **`securityHeaders`** = `helmet({...})` with the strict CSP from D10: `defaultSrc ['self']`, `scriptSrc ['self']`, `styleSrc ['self','unsafe-inline']` (shadcn needs it), `imgSrc ['self','data:']`, `connectSrc ['self']`, `fontSrc ['self','data:']`, `objectSrc ['none']`, `baseUri ['self']`, `frameAncestors ['none']`, `formAction ['self']`; `crossOriginEmbedderPolicy:false`; HSTS `maxAge 31536000, includeSubDomains:true`.
+  > ⚠️ **As-built (found 2026-07):** set `contentSecurityPolicy.useDefaults: false` so ONLY the listed directives are emitted. Helmet's defaults otherwise add **`upgrade-insecure-requests`**, which breaks the bundled SPA served over plain **http** at `http://localhost:3000` (it upgrades same-origin asset requests to https). In prod behind Caddy everything's already https, so its absence is harmless. Also, helmet 8's HSTS option key is **`strictTransportSecurity`** (`{ maxAge, includeSubDomains }`), not `hsts`. **Verify the CSP against the built SPA at :3000 (not Vite dev :5173, whose HMR uses inline/eval scripts a strict CSP blocks)** — load it in a real browser and confirm zero CSP violations in the console.
+  > **Prod-run gotcha:** the base `docker-compose.yml` runs the backend with `NODE_ENV=development` (from `.env`), and `pino-pretty` is a devDependency omitted by the image's `--prod` install — so the logger must guard the pretty transport (only use it when it resolves) or the container crash-loops. Phase 5's prod compose should set `NODE_ENV=production`.
 - **`authLimiter`** = `express-rate-limit` 10 / 15 min, `standardHeaders:"draft-7"`, JSON message.
 - **`apiLimiter`** = 120 / min.
 
