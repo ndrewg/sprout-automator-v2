@@ -100,7 +100,7 @@ export async function recoverOrphanedRuns(): Promise<number> {
 - **`executeQueuedRun(runId)`** (the executor):
   1. Load the run; load the credentials; decrypt sprout username/password (if missing → mark run `failure`, return). Decrypt gmail email + app password; `imapAvailable = !!both`.
   2. `UPDATE runs SET status="running"`.
-  3. `log = (msg) => appendRunStep(runId, msg)` (fire-and-forget, error logged).
+  3. `log = (msg) => appendRunStep(runId, msg)` (fire-and-forget, error logged). **Also mirror it to the app logger** — `logger.info({ runId }, msg)` in the same closure — plus "run enqueued/started/finished" lifecycle lines, so run progress shows in the backend logs, not only in `runs.steps`/the UI. (Otherwise the server log during a run shows nothing but the frontend's `GET /runs` polls.) Relatedly: give `pino-http` an `autoLogging.ignore` for GET `/runs` and `/health` so those frequent polls don't drown the log, and add `pino-pretty` as a dev-only transport for readable logs (raw JSON in prod; redaction still applies before the transport).
   4. Build `waitForOtpCode`: start `waitForOtp(runId)` (manual bridge). If `imapAvailable`, also start `pollForOtp({email,appPassword},{signal})` and `Promise.any([manual, imap])`; in a `finally`, `otpAbort.abort()` + `cancelWait(runId)` so the loser stops. If not available, just await the manual bridge.
   5. `runAutomation({ userId, runId, action, creds, waitForOtpCode, log })`.
   6. Map result → status: `success` (`result.success && !skipped`), `skipped` (`result.success && skipped`), else `failure`. `UPDATE runs SET status, loginMethod, error?, finishedAt=now`.
