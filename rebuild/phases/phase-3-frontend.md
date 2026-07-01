@@ -113,6 +113,10 @@ All panels follow the same pattern: a query hook for reads, local `useState` onl
 
 In `index.ts`, after the API routers: `express.static(path.resolve(__dirname,"../public"))` then a **catch-all GET** that serves `index.html` for any path **not** starting with `/auth|/credentials|/schedule|/runs|/health` (regex negative-lookahead) so client-side routing works while the API stays reachable. Use `fileURLToPath(import.meta.url)` for `__dirname` (ESM).
 
+> ⚠️ **Prerequisites the 3E gate needs (create them now — found missing 2026-06):** the build fails without them.
+> - **`app/backend/Dockerfile`** — reproduce verbatim from doc `04` / `reference/supply-chain-and-ci.md` (pnpm, Playwright base). It's referenced by `docker-compose.yml` but no earlier phase materialized it.
+> - **`app/.dockerignore`** (build context is `./app`) excluding `**/node_modules`, `**/dist`, `**/.env*`, `backend/data` — **not in the original spec.** Without it, `COPY frontend ./` / `COPY backend …` drag host (Windows) `node_modules` into the Linux image and the build breaks.
+
 **Gate 3E:** `docker compose up -d --build` (full image), open `http://localhost:3000` (the backend, not Vite) → the SPA loads and the whole flow from 3D works against the bundled assets with prod security headers.
 
 If 3A–3E pass, Phase 3 is done — five gate commits should already be in history (see Commit checkpoints above). Tag it: `git tag phase-3-complete`.
