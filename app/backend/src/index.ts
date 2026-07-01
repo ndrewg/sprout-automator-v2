@@ -37,6 +37,15 @@ app.use(
       res.setHeader("x-request-id", id);
       return id;
     },
+    // Don't log the high-frequency frontend polls (they drown out real
+    // activity like run progress). POST /runs, GET /runs/:id, etc. still log.
+    autoLogging: {
+      ignore: (req) => {
+        if (req.method !== "GET") return false;
+        const url = (req.url ?? "").split("?")[0];
+        return url === "/runs" || url === "/health";
+      },
+    },
   }),
 );
 

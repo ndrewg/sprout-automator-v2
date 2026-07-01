@@ -51,6 +51,7 @@ export async function startRun(params: {
       .returning();
     if (!run) throw new Error("startRun: insert returned no row");
     runQueue.enqueue({ runId: run.id });
+    logger.info({ runId: run.id, userId, action }, "run enqueued");
     return { ok: true, run };
   } catch (err: unknown) {
     if (isUniqueViolation(err)) {
@@ -93,8 +94,12 @@ export async function executeQueuedRun(runId: string): Promise<void> {
   const imapAvailable = !!(gmailEmail && gmailAppPassword);
 
   await db.update(runs).set({ status: "running" }).where(eq(runs.id, runId));
+  logger.info({ runId, action: run.action }, "run started");
 
   const log = (message: string): void => {
+    // Mirror each step to the backend logger AND persist it to runs.steps so
+    // run progress is visible in the server logs, not only in the UI.
+    logger.info({ runId }, message);
     void appendRunStep(runId, message);
   };
 
@@ -139,6 +144,10 @@ export async function executeQueuedRun(runId: string): Promise<void> {
         finishedAt: new Date(),
       })
       .where(eq(runs.id, runId));
+    logger.info(
+      { runId, status, loginMethod: result.loginMethod },
+      "run finished",
+    );
   } catch (err: unknown) {
     cancelWait(runId);
     const message = err instanceof Error ? err.message : String(err);

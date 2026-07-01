@@ -22,6 +22,20 @@ export const logger = pino({
     "APP_ENCRYPTION_KEY",
     "SESSION_SECRET",
   ],
+  // Human-readable, colorized logs in dev; raw JSON in prod (for aggregation).
+  // Redaction is applied before the transport, so secrets stay redacted either way.
+  ...(config.NODE_ENV === "production"
+    ? {}
+    : {
+        transport: {
+          target: "pino-pretty",
+          options: {
+            colorize: true,
+            translateTime: "SYS:HH:MM:ss",
+            ignore: "pid,hostname",
+          },
+        },
+      }),
 });
 
 export type Logger = typeof logger;
