@@ -2,7 +2,7 @@
 
 Read this first, before any phase file. The phase docs describe a *plan*; this describes the *reality*. When they disagree, this file wins and the phase file needs a correction note.
 
-Last updated: **2026-08-07**. Phase 6 code complete; review-defect fixes (skip reason, ANSI) applied; `[manual]` Telegram checks outstanding.
+Last updated: **2026-08-07**. Phase 6 complete and committed (`a81c96d`); all `[manual]` checks passed against live Telegram and live HRHub except the success ✅ notification, which is deferred because it cannot be produced without a real clock action. Not yet tagged.
 
 ---
 
@@ -22,7 +22,7 @@ Last updated: **2026-08-07**. Phase 6 code complete; review-defect fixes (skip r
 | SPA served from Express in the production image | ✅ | tag `phase-3-complete` |
 | Helmet CSP + HSTS, rate limits, trust proxy, body cap | ✅ | commit `21a0971` — **4A only, not tagged** |
 | Test harness: `app.ts`/`index.ts` split, vitest unit+integration projects, 23 integration tests, Playwright e2e | ✅ | phase T — `[manual]` Docker check passed; not yet tagged |
-| Run notifications + missed-run reconciliation | ✅ | phase-6 code + review-defect fixes (skip reason, ANSI); **not yet tagged** — `[manual]` Telegram checks outstanding (addendum E) |
+| Run notifications + missed-run reconciliation | ✅ | commit `a81c96d`; six review rounds (defects 3, 12, 17, 18, 19, 20). `[manual]`: settings round-trip, test button, rate limit, enable guard, encrypted-at-rest, failure ⚠️, skipped ℹ️, missed 🔴 (incl. no-duplicate) all verified live — see `reviews/phase-6-addendum.md` § E. Success ✅ deferred (needs a real clock action). **Not yet tagged** |
 
 The app runs today via `docker compose up -d --build` on `http://localhost:3000` (see `RUNNING.md`). Backend tests live in `app/backend/test/` mirroring `src/`.
 
