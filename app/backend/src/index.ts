@@ -1,11 +1,24 @@
 import { config } from "./config";
 import { logger } from "./lib/logger";
+import { parseSignupAllowlist } from "./lib/signup-allowlist";
 import { app } from "./app";
 import { recoverOrphanedRuns, runQueue } from "./services/run-queue";
 import { executeQueuedRun } from "./services/runs";
 import { loadAllSchedules, startMissedRunSweep } from "./services/scheduler";
 
 async function start(): Promise<void> {
+  // 4A.2: in development an unset SIGNUP_ALLOWED means signup is open. Warn
+  // once so a future public deploy doesn't happen by accident. (Production
+  // refuses to boot entirely — see config.ts.)
+  if (
+    config.NODE_ENV === "development" &&
+    parseSignupAllowlist(config.SIGNUP_ALLOWED).length === 0
+  ) {
+    logger.warn(
+      "SIGNUP_ALLOWED is not set — signup is open to anyone who can reach this server. Set it before deploying anywhere public.",
+    );
+  }
+
   // Register the run executor with the queue. This lives in the startup path,
   // NOT in app.ts: importing the app for a route test must not register an
   // executor that could launch Chromium.

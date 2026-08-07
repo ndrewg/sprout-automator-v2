@@ -5,6 +5,7 @@ import { logger } from "./logger";
 // The closed set of security-relevant events (per reference/database-schema.md).
 export type AuditEventType =
   | "signup"
+  | "signup_rejected"
   | "login_success"
   | "login_failure"
   | "logout"

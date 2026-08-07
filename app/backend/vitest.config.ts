@@ -10,6 +10,12 @@ export default defineConfig({
       APP_ENCRYPTION_KEY: "0".repeat(64),
       SESSION_SECRET: "x".repeat(48),
       DATABASE_URL: "postgres://test:test@localhost:5432/test",
+      // Signup allowlist for the test environment (§4A.2): the harness signs
+      // every test user up through the REAL /auth/signup route with an
+      // @example.com address, so the allowlist must admit example.com.
+      // Deliberately capital-E: it doubles as the case-insensitivity proof for
+      // the allowlist side, since the harness emails are lowercase.
+      SIGNUP_ALLOWED: "Example.com, maz.getutua@gmail.com",
     },
   },
 });

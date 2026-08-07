@@ -9,7 +9,12 @@ import { expect, test } from "@playwright/test";
 // No test contains a real credential: everything below is throwaway.
 // Each run signs up a fresh email so reruns never collide.
 
-const email = `e2e-${Date.now()}@example.com`;
+// Two projects (desktop + mobile) run this file in parallel, and each worker
+// evaluates `email` at module load. Date.now() alone is not enough: two
+// workers spawning in the same millisecond collide on the same email and the
+// second signup 409s. The random suffix keeps the fresh-email guarantee per
+// worker while still ending in @example.com (admitted by the test allowlist).
+const email = `e2e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
 const password = "e2e-signup-password-123";
 const sproutUsername = "e2e-sprout-user";
 const sproutPassword = "e2e-sprout-password-123";

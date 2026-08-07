@@ -35,6 +35,7 @@ console.log(`[e2e-server] copied SPA → ${backendPublic}`);
 
 // Isolate e2e from the dev DB: use sprout_test and a dead SPROUT_URL so no run
 // could ever reach real HRHub. NODE_ENV=test keeps cookies non-Secure over http.
+// SIGNUP_ALLOWED must admit the smoke flow's @example.com signup (4A.2 gating).
 const backendEnv = {
   ...process.env,
   NODE_ENV: "test",
@@ -43,6 +44,7 @@ const backendEnv = {
   APP_ENCRYPTION_KEY: "0".repeat(64),
   SESSION_SECRET: "e2e-session-secret-not-for-production-123456789",
   SPROUT_URL: "http://127.0.0.1:9/",
+  SIGNUP_ALLOWED: "example.com",
 };
 
 // Migrate the test database (the backend does not auto-migrate).

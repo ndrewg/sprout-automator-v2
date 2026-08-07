@@ -2,12 +2,17 @@ import { createHash, randomBytes } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
+import { config } from "../config";
 import { db } from "../db/client";
 import { users, type User } from "../db/schema";
 import { hashPassword, verifyPassword } from "../lib/passwords";
 import { createSession, deleteSession } from "../lib/sessions";
 import { setSessionCookie, clearSessionCookie } from "../lib/cookies";
 import { recordAudit } from "../lib/audit";
+import {
+  isEmailAllowed,
+  parseSignupAllowlist,
+} from "../lib/signup-allowlist";
 import { requireAuth } from "../middleware/auth";
 
 export const authRouter = Router();
@@ -60,8 +65,25 @@ authRouter.post("/signup", async (req: Request, res: Response) => {
     return;
   }
   const { email, password } = parsed.data;
-  const passwordHash = await hashPassword(password);
   const { ip, userAgent } = clientInfo(req);
+
+  // 4A.2 signup gating — the email allowlist. Rejects BEFORE the password
+  // hash. The response is the same generic message regardless of cause so it
+  // never reveals the allowlist contents; the audit trail records only a
+  // non-reversible emailHash (never the email), mirroring login_failure. An
+  // empty allowlist (dev without SIGNUP_ALLOWED) means signup is open.
+  const signupAllowlist = parseSignupAllowlist(config.SIGNUP_ALLOWED);
+  if (signupAllowlist.length > 0 && !isEmailAllowed(email, signupAllowlist)) {
+    await recordAudit("signup_rejected", {
+      ip,
+      userAgent,
+      metadata: { emailHash: emailHash(email) },
+    });
+    res.status(403).json({ error: "Signup is not open." });
+    return;
+  }
+
+  const passwordHash = await hashPassword(password);
 
   try {
     const [u] = await db.insert(users).values({ email, passwordHash }).returning();

@@ -2,7 +2,7 @@
 
 Read this first, before any phase file. The phase docs describe a *plan*; this describes the *reality*. When they disagree, this file wins and the phase file needs a correction note.
 
-Last updated: **2026-08-07**. Phases T, 6 and 7 all built, reviewed and committed in one session (`ccc6f30`, `a81c96d`, `e6c81f9`). Every `[manual]` check for 6 and 7 passed against live Telegram and live HRHub, except the phase-6 success ✅ notification, which is deferred because it cannot be produced without a real clock action. Phase 6 is tagged; T and 7 are not.
+Last updated: **2026-08-07**. Phases T, 6, 7 and 4A.2 all built, reviewed and committed in one session (`ccc6f30`, `a81c96d`, `e6c81f9`, + signup gating). Every `[manual]` check for 6 and 7 passed against live Telegram and live HRHub, except the phase-6 success ✅ notification, which is deferred because it cannot be produced without a real clock action. Phase 6 is tagged; T and 7 are not.
 
 ---
 
@@ -23,6 +23,7 @@ Last updated: **2026-08-07**. Phases T, 6 and 7 all built, reviewed and committe
 | Helmet CSP + HSTS, rate limits, trust proxy, body cap | ✅ | commit `21a0971` — **4A only, not tagged** |
 | Test harness: `app.ts`/`index.ts` split, vitest unit+integration projects, 23 integration tests, Playwright e2e | ✅ | phase T — `[manual]` Docker check passed; not yet tagged |
 | Run notifications + missed-run reconciliation | ✅ | commit `a81c96d`; six review rounds (defects 3, 12, 17, 18, 19, 20). `[manual]`: settings round-trip, test button, rate limit, enable guard, encrypted-at-rest, failure ⚠️, skipped ℹ️, missed 🔴 (incl. no-duplicate) all verified live — see `reviews/phase-6-addendum.md` § E. Success ✅ deferred (needs a real clock action). **Not yet tagged** |
+| Signup gating — email allowlist (§ 4A.2) | ✅ | `SIGNUP_ALLOWED` takes domains and exact addresses; optional in dev (allow-all + warning), **required in production or the app refuses to boot**. All six `[manual]` checks passed live, including the substring attack (`notorchard.com.au` → 403) and grandfathering (an address removed from the list could no longer sign up but still logged in). Rejections audit an `emailHash` only. See `reviews/phase-4A2-addendum.md`. **Not yet tagged** |
 | Pause / leave days (schedule pause window + controls) | ✅ | commit `e6c81f9`; gates 7A + 7B green (66 unit, 48 integration, e2e desktop + mobile). **All seven `[manual]` checks passed live** — banner, "Skip tomorrow", **a paused day suppressed a real cron fire**, **no missed-run alert while paused and the alert returned once unpaused**, manual runs still work while paused, clearing restores normal, and a past window auto-expired with no user action. Migration `0002_pause.sql` applied to the dev DB and `pnpm dev` verified booting. See `reviews/phase-7-addendum.md`. **Not yet tagged** |
 
 The app runs today via `docker compose up -d --build` on `http://localhost:3000` (see `RUNNING.md`). Backend tests live in `app/backend/test/` mirroring `src/`.
@@ -31,7 +32,6 @@ The app runs today via `docker compose up -d --build` on `http://localhost:3000`
 
 | Area | Where it's specified | Blocking? |
 |---|---|---|
-| Signup gating (invite code / domain allowlist) | `phases/phase-4-security.md` § 4A.2 | **before any public host** |
 | Account lifecycle: email verify, password reset, idle timeout, deletion, export | `phases/phase-4-security.md` § 4B | before inviting >3 people |
 | TLS deploy: `docker-compose.prod.yml`, `Caddyfile`, `DEPLOY.md`, backups | `phases/phase-5-deploy-ops.md` | before leaving the LAN |
 | Everything else | `BACKLOG.md` | ranked there |
@@ -40,9 +40,8 @@ The app runs today via `docker compose up -d --build` on `http://localhost:3000`
 
 The goal is **all the code finished and verified locally in Docker**, with no VPS yet. That is achievable for everything except the parts that need a real host.
 
-1. **Phase 4A.2** — signup gating. Must land before anything is publicly reachable; also trivially testable.
-2. **Phase 4B** — account lifecycle. Email flows work in dev without a provider: `lib/mailer.ts` logs the email instead of sending when `RESEND_API_KEY` is unset. Wants the test harness underneath it (now built), since it rewrites auth.
-3. **Phase 5 artifacts** — `docker-compose.prod.yml`, `Caddyfile`, `DEPLOY.md`, the backup script. **Write and verify these locally**: Caddy's `tls internal` issues a self-signed cert, so the full TLS path, the "backend port not published" property, and the `pg_dump`/restore cycle can all be proven on your own machine. What genuinely needs the VPS is only §5.2 (host hardening) and the live-TLS gate item — mark those `[manual]` and leave them.
+1. **Phase 4B** — account lifecycle. Email flows work in dev without a provider: `lib/mailer.ts` logs the email instead of sending when `RESEND_API_KEY` is unset. Wants the test harness underneath it (now built), since it rewrites auth.
+2. **Phase 5 artifacts** — `docker-compose.prod.yml`, `Caddyfile`, `DEPLOY.md`, the backup script. **Write and verify these locally**: Caddy's `tls internal` issues a self-signed cert, so the full TLS path, the "backend port not published" property, and the `pg_dump`/restore cycle can all be proven on your own machine. What genuinely needs the VPS is only §5.2 (host hardening) and the live-TLS gate item — mark those `[manual]` and leave them.
 
 Working prompts for each round are in [`SESSION-PROMPT.md`](./SESSION-PROMPT.md).
 

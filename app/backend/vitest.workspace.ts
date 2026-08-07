@@ -31,6 +31,9 @@ export default defineWorkspace([
         DATABASE_URL:
           "postgres://sprout:sprout_dev_pw@localhost:5432/sprout_test",
         SPROUT_URL: "http://127.0.0.1:9/",
+        // Same allowlist as the root test env (merged, not replaced): the
+        // harness signs test users up through the real signup route.
+        SIGNUP_ALLOWED: "Example.com, maz.getutua@gmail.com",
       },
     },
   },
