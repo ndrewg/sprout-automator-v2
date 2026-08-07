@@ -32,6 +32,26 @@ Wire into `index.ts` in this order: `app.set("trust proxy",1)` → `app.use(secu
 
 **Gate 4A:** response headers show CSP + HSTS + `X-Frame-Options`/`X-Content-Type-Options`; 11 rapid bad logins → the 11th returns `429`; a `<script>alert(1)</script>` injected into a text field never executes (CSP blocks inline). Health is never rate-limited.
 
+---
+
+## 4A.2 — Signup gating (⚑ do this BEFORE Phase 5 exposes anything publicly)
+
+**The hole:** anyone who reaches the URL can create an account. There is no invite code, no allowlist, no approval step. On localhost that is harmless; the moment Phase 5 puts this behind a public domain, it is the real exposure — bigger than the CSRF we correctly deferred, because it needs no attack, just the URL.
+
+**Email verification (4B.2) does not close it.** Verification proves someone controls *some* mailbox. It says nothing about whether they should have an account on a tool that stores HRHub credentials for your colleagues.
+
+Pick **one** and implement it in `POST /auth/signup`, before the password hash:
+
+- **Invite code** (simplest, recommended). `SIGNUP_INVITE_CODE` in `config.ts` — a required, non-empty string in production. Signup body takes `inviteCode`; mismatch → `403 { error: "Signup is invite-only." }`. You share the code out-of-band with colleagues. Rotating it is an env change plus a restart.
+- **Email domain allowlist.** `SIGNUP_ALLOWED_DOMAINS` as a comma-separated list; reject any email whose domain isn't in it. Better if everyone shares a corporate domain, and it needs no secret sharing — but it also means anyone who can guess an address at that domain can sign up, so pair it with 4B.2 verification.
+- **Closed signup.** `SIGNUP_ENABLED=false` and you create accounts by hand. Most secure, least convenient; reasonable if the user list is final.
+
+Whichever you choose: fail with the **same generic message** regardless of *why* (bad code vs disabled signup), audit the rejection as `signup_rejected` with the reason in metadata (never the attempted code or email — use the same non-reversible `emailHash` as `login_failure`), and apply `authLimiter` so the invite code can't be brute-forced. Add `signup_rejected` to the `AuditEventType` union.
+
+**Gate 4A.2:** signup without the code → `403`; with it → `201`; 11 rapid wrong-code attempts → the 11th is `429`; the audit table shows `signup_rejected` rows with no code or email value in them; with signup gated, the existing signup tests still pass once updated to supply the code.
+
+---
+
 > Tenant isolation, secret redaction, Argon2id, AES-256-GCM, Zod `.strict()`, audit logging, and the run concurrency caps are **already built in Phases 1–2** — they are the bulk of "security" and are not deferred. 4A is only the HTTP edge.
 
 ---

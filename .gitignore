@@ -16,6 +16,11 @@ app/backend/public/
 # Logs
 *.log
 
+# Test artifacts (Playwright writes these on every run)
+test-results/
+playwright-report/
+.playwright/
+
 # Archived prior build — REFERENCE ONLY, never version-controlled.
 # Contains live secrets (.env, Sprout session cookies/storage-state, n8n db +
 # encryption key). It stays on disk for reference; it must not enter git.

@@ -1,6 +1,8 @@
 # Reference — Live Docs for Post-Cutoff Stack (Context7 / MCP)
 
-**The problem this solves.** This build targets the **latest** stack — React 19, Tailwind 4, Express 5, shadcn-latest, Playwright 1.60, PostgreSQL 18, Drizzle, pnpm 11 — but a local model's **training cutoff may predate most of it** (React 19 = Dec 2024, Tailwind 4 = Jan 2025, Express 5 default = Mar 2025, pnpm 11, PG 18, Playwright 1.60 are all 2025–2026). A model that never saw these will confidently emit **stale, wrong APIs** (v3 Tailwind config, Express-4 patterns, React-18 types, npm instead of pnpm).
+**The problem this solves.** This build targets the **latest** stack — React 19, Tailwind 4, Express 5, shadcn-latest, Playwright 1.60, PostgreSQL 18, Drizzle, pnpm 11 — and some of it post-dates **every** model's training cutoff, because there is always a newest version. A model that never saw a library will confidently emit **stale, wrong APIs** (v3 Tailwind config, Express-4 patterns, React-18 types, npm instead of pnpm), and it will do so *fluently* — there is no hesitation to warn you.
+
+> ⚠️ **This rule is not about weak models.** It was written when the implementer was a late-2024 local model, and it applies unchanged to a frontier one. A stronger model is not more likely to know what shipped after it was trained; it is only more likely to sound certain about it. If you are reading this and thinking "my knowledge is recent enough" — that is precisely the failure mode. Fetch the docs.
 
 **The fix:** give the model a live-documentation tool and make it a *rule* to consult current docs for any post-cutoff library **before** writing that code — not guess from training. Attach this file to **every** phase.
 

@@ -4,7 +4,9 @@ Exact dependency versions and the full contents of every config file. The LLM sh
 
 > **Stack decisions locked for this build (June 2026) — LATEST across the board:** Express **5**, PostgreSQL **18**, Playwright **1.60.0**, Node **22**, **pnpm 11** (supply-chain hardening — `reference/supply-chain-and-ci.md`), and the **latest frontend**: **React 19 + Tailwind CSS v4 + shadcn-latest + Vite 6 + TanStack Query v5**. Deploy target is a **4 GB** Hetzner CPX21.
 >
-> ⚠️ **Most of this stack is post-cutoff for a late-2024 local model.** The model must **fetch current docs at build time via Context7 (MCP)** rather than emit remembered (stale) APIs — this is how we run the latest stack on an older model. See `reference/live-docs-and-mcp.md`; it's attached to every phase.
+> ⚠️ **Most of this stack post-dates common training cutoffs.** **Fetch current docs at build time via Context7 (MCP)** rather than emitting remembered (stale) APIs. See `reference/live-docs-and-mcp.md`; it's attached to every phase.
+>
+> ⚠️ **As-built drift (frontend versions).** This document targets Vite 6 / TypeScript 5.6, but the Vite `react-ts` template used in Phase 3 pinned **Vite 8 + TypeScript 6**, and that is what is installed. Consequences already handled in the code: **TS 6 deprecates `baseUrl`**, so the shadcn `@/*` alias is configured with `paths` alone (no `baseUrl`) in `tsconfig.json` + `tsconfig.app.json`. Treat the frontend version numbers below as a **floor, established by the CLI**, not as pins — the backend pins (especially `playwright@1.60.0`) are real pins and still binding. See `phases/phase-3-frontend.md` § 3A.
 
 ---
 

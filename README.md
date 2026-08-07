@@ -75,11 +75,16 @@ see the "Local development" section of RUNNING.md (open `http://localhost:5173`)
 | Automation (Playwright, run queue, IMAP OTP, cron + holidays) | ✅ done, validated against live HRHub |
 | Dashboard (SPA) | ✅ done |
 | HTTP hardening (Helmet/CSP, rate limits) | ✅ done (Phase 4A) |
+| Telegram run notifications + missed-run alerts | ⏳ next (Phase 6) |
+| Pause / leave days | ⏳ planned (Phase 7) |
+| Signup gating (invite code / allowlist) | ⏳ required before public hosting (Phase 4A.2) |
 | Account lifecycle (email verify, password reset, etc.) | ⏳ deferred (Phase 4B — needs a mail provider) |
 | HTTPS reverse-proxy deploy (Caddy) + `DEPLOY.md` | ⏳ pending (Phase 5) |
 
 ## Documentation
 
 - **[RUNNING.md](./RUNNING.md)** — run / self-host / dev loop.
+- **[rebuild/STATE.md](./rebuild/STATE.md)** — what's built, what's next, known gaps. Read this first.
+- **[rebuild/BACKLOG.md](./rebuild/BACKLOG.md)** — ranked known-missing work.
 - **[rebuild/00-START-HERE.md](./rebuild/00-START-HERE.md)** — the build spec, architecture decisions, and per-phase plan.
 - **[AGENTS.md](./AGENTS.md)** / **[CLAUDE.md](./CLAUDE.md)** — always-on rules for AI-assisted work on this repo.

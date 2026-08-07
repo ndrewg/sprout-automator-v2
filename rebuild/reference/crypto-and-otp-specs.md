@@ -29,7 +29,9 @@ if (KEY.length !== 32) {
 
 export function encrypt(plaintext: string): string {
   const iv = randomBytes(IV_LEN);
-  const cipher = createCipheriv("aes-256-gcm", KEY, iv);
+  const cipher = createCipheriv("aes-256-gcm", KEY, iv, {
+    authTagLength: TAG_LEN,
+  });
   const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   const payload = Buffer.concat([Buffer.from([VERSION]), iv, tag, ct]);
@@ -48,7 +50,9 @@ export function decrypt(token: string): string {
   const iv = buf.subarray(1, 1 + IV_LEN);
   const tag = buf.subarray(1 + IV_LEN, 1 + IV_LEN + TAG_LEN);
   const ct = buf.subarray(1 + IV_LEN + TAG_LEN);
-  const decipher = createDecipheriv("aes-256-gcm", KEY, iv);
+  const decipher = createDecipheriv("aes-256-gcm", KEY, iv, {
+    authTagLength: TAG_LEN,
+  });
   decipher.setAuthTag(tag);
   const plaintext = Buffer.concat([decipher.update(ct), decipher.final()]);
   return plaintext.toString("utf8");
@@ -66,6 +70,8 @@ export function decryptOptional(token: string | null | undefined): string | null
 ```
 
 **Rules:** this is the only module that touches `*_enc` columns. Never reuse an IV (generate fresh per `encrypt()`). `encryptOptional("")` returns `null` (empty = "clear").
+
+> ⚠️ **`authTagLength: TAG_LEN` is required on BOTH the cipher and the decipher.** Without it on the decipher, Node accepts a **truncated** authentication tag (DEP0182 / CVE-2025-54887 class), which weakens forgery resistance — a shortened tag is far cheaper to forge than a full 16-byte one. Pinning it is backward-compatible: every payload this module has ever written already carries a 16-byte tag. (Added 2026-08; the original as-built omitted it — see `phases/phase-6-notifications.md` § 6A.)
 
 ⚑ RECOMMENDED test (`vitest`): round-trip (`decrypt(encrypt(x)) === x`); two encryptions of the same input produce different ciphertext; flipping any byte makes `decrypt` throw; a `0x02` version byte throws "unsupported".
 

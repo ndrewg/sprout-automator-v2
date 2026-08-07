@@ -136,6 +136,24 @@ Two *independent* mechanisms solving two *different* problems — do not merge t
 - This is the load-bearing decision that lets the latest stack (D1, D13, D14, D15) run on the user's existing model, and it future-proofs: the next major is a docs fetch, not a model upgrade.
 - The pinned reference code (`reference/*`) stays authoritative — the model reproduces it verbatim; live docs cover everything else.
 
+### D17 — Run notifications via Telegram, including runs that never happened
+- Notification channel is the **Telegram Bot API over plain `fetch`** — no SMTP, no deliverability problem, no new dependency, ~1 minute of user setup via BotFather. Per-user bot token (encrypted, AES-256-GCM) + chat ID (**not** encrypted — an identifier, not a secret), in a **new `notification_settings` table** so `schedules` stays about times.
+- **All four outcomes notify** — `success`, `failure`, `skipped`, `missed` — as four independent toggles, all defaulting on. `skipped` is included deliberately: its only producer is the fail-safe already-clocked guard, which returns `true` both when you really did clock *and* when it could not verify. The second case means **you are not clocked in**, and it is the earliest signal of HRHub markup drift. The notifier distinguishes them by reading the run's last step message — **not** by modifying `clock.ts`.
+- **Scheduled and manual runs both notify.** One rule, no branching on origin.
+- **Missed-run reconciliation ships in the same phase**, and this is the load-bearing half. A process that is down cannot report that it is down: if cron never fires, no run row exists and nothing notifies. Silence then becomes indistinguishable from success, which makes the whole feature untrustworthy. A 5-minute sweep compares enabled schedules against today's runs and alerts past a grace window. Idempotency is a **unique index on `(user_id, manila_date, action)`** with insert-then-send — the same "let the database decide, never `SELECT` then act" pattern as D6.
+- **Dispatch is fire-and-forget and never affects a run** — not its status, not its timing, not an HTTP response. Asserted by a test, not by intent.
+- Transport (`lib/telegram.ts`, HTTP only, no DB) is split from policy (`services/notifications.ts`, DB only, no HTTP) so each is testable alone. Full spec: `phases/phase-6-notifications.md`.
+
+### D18 — Pause windows are date ranges, never a boolean
+- Leave, half-days, and shutdowns are skipped via `paused_from` / `paused_until` on `schedules` — an inclusive Manila-calendar-day range.
+- **A boolean "paused" flag is the obvious design and it is wrong:** someone pauses for leave, forgets to unpause, and silently stops clocking in for a month. A date range expires on its own. Stored as `YYYY-MM-DD` text/date so ISO string comparison is correct without any timezone arithmetic.
+- Pausing suppresses **automation only** — a manual "Clock in now" still works, because clicking it is an explicit statement of intent. Paused days must also suppress the D17 missed-run alert, or the alerts train the user to ignore them. Full spec: `phases/phase-7-schedule-pause.md`.
+
+### D19 — Verification gates are executable, not prose
+- Phases 0–5 gates were shell commands whose output a **human** interpreted (fire five requests and count the 202s; check a response "isn't instant"). That model breaks once an agentic loop is the implementer: asked whether a prose gate passed, a model with nothing to run will reason about whether the code *ought* to pass and report success — not dishonesty, just no other signal.
+- From phase 6 on, **a gate is a command with an exit code**, and checks genuinely needing a human are marked `[manual]`. The properties that most need this are the invisible ones — the `23505` race guard, tenant isolation, "no secret in this response" — which fail silently and correctly-looking.
+- **HRHub automation stays untestable** and that is accepted: the selectors run against a third party we cannot stage, so a fixture only proves the code matches our *belief* about HRHub. Drift detection remains screenshots plus a vision model. Everything else is automated so that when something breaks, drift is the only remaining suspect. Full spec: `reference/testing-strategy.md`.
+
 ---
 
 ## Architecture at a glance

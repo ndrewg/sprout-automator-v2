@@ -1,8 +1,10 @@
 # 00 — START HERE (read this before anything else)
 
-This `rebuild/` directory is a **complete, self-contained specification** for rebuilding the Sprout Automator from scratch. It exists so that a local LLM (running on consumer hardware) can implement the entire project **without losing the plot** — every decision, contract, selector, and gotcha that was learned the hard way is written down here so the model never has to guess.
+This `rebuild/` directory is a **complete, self-contained specification** for the Sprout Automator — every decision, contract, selector, and gotcha that was learned the hard way, written down so the implementer never has to guess.
 
-You (the human) are the orchestrator. The LLM is the implementer. These docs are the shared source of truth between you.
+You (the human) are the orchestrator. A coding model is the implementer. These docs are the shared source of truth between you.
+
+> **Phases 0–3 and 4A are built.** These docs began as a from-scratch build plan for a local model; that build is done. Read **[`STATE.md`](./STATE.md)** first — it says what actually exists today. Phases 0–5 are now an **as-built record**; new work starts at phase 6 and [`BACKLOG.md`](./BACKLOG.md).
 
 ---
 
@@ -14,63 +16,43 @@ Full detail: [`01-PROJECT-BRIEF.md`](./01-PROJECT-BRIEF.md).
 
 ---
 
-## How to use these documents with a local LLM
+## How to use these documents
 
-Local models are not frontier models. They have shorter *usable* context (quality degrades long before the advertised window fills), weaker instruction-following, and they drift over long generations. These docs are engineered around that reality. **Follow this protocol:**
+The always-on rules live in **[`AGENTS.md`](./AGENTS.md)** (opencode and Claude Code both auto-load it, at the repo root and here). You do not need to paste a system prompt — attach the phase file and go.
 
-### The golden protocol
+### The protocol
 
-1. **One phase per session.** Never paste the whole `rebuild/` directory and say "build it." Start a fresh chat for each phase. Feed only:
-   - This file's **§ Paste-in system prompt** (every session, at the top).
-   - The **single phase file** you're working on (`phases/phase-N-*.md`).
-   - Only the **reference files that phase explicitly lists** under "Attach these."
-2. **Build, then gate, then advance.** Each phase ends with a **Verification Gate** — concrete commands and expected output. Do not start phase N+1 until phase N's gate passes. If the gate fails, paste the error back into the *same* session and iterate.
-3. **Prescribe, never brainstorm.** These docs deliberately state *the one correct way* to do each thing. If the model proposes an alternative ("should I use JWT instead of DB sessions?"), the answer is no — the decision is already made in [`02-DECISIONS-AND-ARCHITECTURE.md`](./02-DECISIONS-AND-ARCHITECTURE.md). Redirect it.
-4. **Reproduce, don't regenerate, the brittle code.** The HRHub selectors, the encryption byte-format, and the OTP regex in `reference/` are copy-paste-ready and were paid for in debugging time. Tell the model to **use them verbatim**, not to invent its own.
-5. **Keep fed context small.** Even though some models advertise 128k–256k windows, on a quantized local model you want to keep each session's working context well under ~32k tokens for reliable output. The per-phase decomposition is what makes that possible — respect it.
-
-### Paste-in system prompt (use at the top of EVERY session)
-
-> You are a senior TypeScript engineer implementing one phase of a pre-designed project called Sprout Automator. All architectural decisions are already made and provided to you in the attached specification — do not propose alternatives, do not redesign, do not "improve" the stack. Your job is to produce correct, complete, copy-paste-ready code that matches the contracts in the spec exactly.
->
-> Hard rules:
-> - TypeScript only, ESM (`"type": "module"`). `moduleResolution` is **Bundler** — **do NOT add `.js` extensions** to relative imports. The code is run directly with `tsx`; there is no compile step for the backend.
-> - All sequential async logic uses `async`/`await` with `try/catch`. **Never use `.then().catch()` for control flow.** The only `.catch()` allowed is the three contained idioms documented in the spec (Playwright best-effort probes, fire-and-forget cleanup, the top-level `main().catch`) — reproduce those verbatim, never generalize them.
-> - Use the exact file paths, function names, table names, and API shapes given in the spec. Do not rename them.
-> - Reproduce any code block the spec marks "copy verbatim" exactly. Do not refactor it.
-> - When a spec section says a value is fixed (a selector, a regex, a byte layout, a cron expression), treat it as fixed.
-> - Never log, echo, or put secrets (passwords, app passwords, OTP codes, encryption keys, session ids) into responses, error messages, or audit metadata.
-> - If something is ambiguous or missing from the spec, STOP and ask me one specific question rather than inventing an answer.
->
-> Output format: for each file you create or change, give the full file path as a heading and the complete file contents in a single code block. Do not abbreviate with "// ... rest unchanged".
-
-Adjust the wording to taste, but keep the hard rules — every one of them maps to a bug that already happened or a decision that's already locked.
+1. **Read [`STATE.md`](./STATE.md) first.** It is the only file that describes reality. Phase docs describe intent, and where they disagree, STATE.md wins and the phase file gets a correction note.
+2. **One phase — or one lettered sub-step — at a time**, gated before advancing. Attach the phase file plus the reference files it lists under "Attach for this session."
+3. **A gate is a command with an exit code.** `pnpm typecheck && pnpm test` passes or it doesn't. Checks needing a human are marked `[manual]`. This matters more than it sounds: asked "did the gate pass?", a model with no test to run will reason about whether the code *ought* to pass and answer yes. Give it something that can say no. See [`reference/testing-strategy.md`](./reference/testing-strategy.md).
+4. **Prescribe, never brainstorm.** These docs deliberately state *the one correct way* to do each thing. If the model proposes an alternative ("should I use JWT instead of DB sessions?"), the answer is no — the decision is already made in [`02-DECISIONS-AND-ARCHITECTURE.md`](./02-DECISIONS-AND-ARCHITECTURE.md). Redirect it.
+5. **Reproduce, don't regenerate, the brittle code.** The HRHub selectors, the encryption byte-format, and the OTP regex in `reference/` are copy-paste-ready and were paid for in debugging time. They get used **verbatim**.
+6. **Fetch live docs, don't trust memory.** Much of this stack post-dates most training cutoffs. See [`reference/live-docs-and-mcp.md`](./reference/live-docs-and-mcp.md) — this rule survived the move to a bigger model unchanged, because a newer model is confidently wrong about a new library in exactly the same way an older one is.
 
 ---
 
-## Your model & runtime (Qwen3.6-35B-A3B-MTP @ 128k, via opencode)
+## Model & runtime (opencode-go, via opencode)
 
-Your setup: **Qwen3.6-35B-A3B-MTP (Unsloth UD-IQ4_NL)** on a **Ryzen 7 9800X3D + RTX 5070 Ti (16 GB) + 32 GB DDR5-6000**, served by `llama-server` with `--fit-ctx 128000`, `q8_0` KV cache, MTP speculative decoding (`--spec-type draft-mtp --spec-draft-n-max 4`), and Qwen's recommended thinking-mode sampling (`temp 0.6 / top-p 0.95 / top-k 20 / min-p 0`). You drive it through **opencode**. This is a perfectly good agentic MoE for this work, and your launch config is well-tuned — these docs are written to play to its strengths, not to push you off it.
+Phases 0–3 were built by Claude Code and a local Qwen. Ongoing work runs on **opencode-go**, driven through **opencode**.
 
-What that setup means for *how* you run these phases:
+**Default model: DeepSeek V4 Flash.** It is strong on agentic coding for this kind of work, and its request quota is high enough that a long tool-calling loop never becomes the constraint — which matters, because every tool call spends a request, and a quota that looks generous per-hour disappears fast inside an agentic loop. Reserve **GLM-5.2** for a single genuinely hard question rather than a whole session; its quota does not survive sustained agentic use.
 
-- **You have 128k context, but don't fill it.** Quality on a quantized local model degrades well before the window is full, and `q8_0` KV at 128k is already a lot of cache. The per-phase design keeps each session's *real* working set to roughly 8–25k tokens (one phase file + 1–3 reference files + the conventions). That is deliberate — it leaves the model plenty of headroom for its own reasoning (`--reasoning-budget -1`) and for opencode's tool/file context, which accumulates across turns.
-- **MTP speculative decoding rewards predictable, idiomatic code** — which is exactly what the "reproduce verbatim" reference blocks and the prescriptive conventions produce. Drafts are accepted more often when the target distribution is sharp, so the more the model is steered to *the one correct pattern*, the faster it runs. The async/await mandate and the DO-NOT list help here too.
-- **Keep the thinking-mode sampling as-is.** `temp 0.6 / top-p 0.95 / top-k 20` is Qwen's official recommendation for reasoning mode and is correct for this — don't drop the temperature to 0 chasing determinism; it hurts this model's reasoning. Determinism comes from the spec being unambiguous, not from the sampler.
-- **The vision projector (`mmproj`) is a bonus.** Since the model can see images, in Phase 2 you can paste a screenshot from `data/screenshots/<userId>/<runId>/` when an HRHub step misbehaves and ask it to compare against the selectors in the playbook.
+**The one thing the default model cannot do is see.** That is fine everywhere except one task:
+
+- **HRHub markup drift.** When a run fails at the clock step, the screenshots in `data/screenshots/<userId>/<runId>/` are the only evidence of what changed. Hand those to a vision-capable model (Haiku is plenty; MiniMax M3 if you want it in-provider) together with `reference/hrhub-automation-playbook.md`, and ask what moved. This is a deliberate, human-triggered handoff — not something to route automatically.
+
+Everything else is text-only **by design**: the gates are executable, so correctness is proved by exit codes rather than by looking at a screen. Keep coding turns free of images; it is cheaper and it is also more reliable.
 
 ### Driving this with opencode
 
-opencode loads project rules from **`AGENTS.md`** files (it reads them at the project root and merges nested ones). Three things make the rebuild reliable through opencode:
+opencode loads project rules from **`AGENTS.md`** (repo root, merging nested ones). Three things make this reliable:
 
-1. **Use `rebuild/AGENTS.md` as the always-on rules file.** It's a compact digest of the conventions + the DO-NOT list + the async rule + the live-docs rule, written so opencode injects it into every turn automatically. When you run a rebuild session, work with your cwd at `rebuild/` (or copy its contents into the repo-root `AGENTS.md`) so opencode always has the guardrails in context — you then only need to *attach the phase file* for that session.
-2. **Add the Context7 docs MCP — this is what lets a late-2024 model build the latest stack.** In `opencode.json` add a `mcp` entry for Context7 (hosted `https://mcp.context7.com/mcp` or local `npx -y @upstash/context7-mcp`). Then the model can fetch current React 19 / Tailwind 4 / Express 5 / shadcn / Drizzle / pnpm docs on demand instead of emitting stale APIs from memory. Exact config + the per-phase fetch list are in `reference/live-docs-and-mcp.md`. **Set this up before Phase 0.**
-3. **One phase per opencode session; gate before advancing.** Start a fresh session per phase, point it at the single `phases/phase-N-*.md`, let it implement, then run that phase's **Verification Gate**. Don't let opencode roam the whole repo per turn — the decomposition is what keeps the model from drifting. If a phase is too big in one go, feed its numbered sub-steps (e.g. `2A`, `2B`, …) as separate turns.
-4. **Two skills are available for Phase 3 UI, in distinct lanes** (phase-3 spells out usage): the **`shadcn` skill** is the authority for shadcn component work (init/add/docs/compose + styling rules; injects project context; v4-aware), and **`ui-ux-pro-max`** is for design decisions + `Platform: Web` responsive/UX review. Context7 covers everything else's docs. When they overlap on shadcn, the shadcn skill wins. The dashboard **must be responsive** — colleagues use it on phones — so apply ui-ux-pro-max's `Platform: Web` rules and skip its React-Native/native-only ones.
+1. **`AGENTS.md` is the always-on rules file** — the conventions, the async rule, the secrets rule, the live-docs rule, and the model-routing note, injected every turn. The root and `rebuild/` copies are kept byte-identical; edit one, copy to the other.
+2. **Add the Context7 docs MCP.** In `opencode.json`, a `mcp` entry for Context7 (hosted `https://mcp.context7.com/mcp` or local `npx -y @upstash/context7-mcp`) lets the model fetch current React 19 / Tailwind 4 / Express 5 / shadcn / Drizzle / pnpm docs instead of emitting remembered ones. Config + per-phase fetch list: `reference/live-docs-and-mcp.md`.
+3. **One phase (or sub-step) per session; gate before advancing.** Attach the single phase file, let it implement, then run the gate. A phase too big for one go is fed as its lettered sub-steps.
+4. **Two skills for UI work, in distinct lanes** (phase-3 spells out usage): the **`shadcn` skill** is the authority for shadcn component work (init/add/docs/compose + styling rules; injects project context; v4-aware), and **`ui-ux-pro-max`** is for design decisions + `Platform: Web` responsive/UX review. Context7 covers everything else's docs. When they overlap on shadcn, the shadcn skill wins. The dashboard **must be responsive** — colleagues use it on phones — so apply ui-ux-pro-max's `Platform: Web` rules and skip its React-Native/native-only ones.
 
-> If you ever want a second opinion on a tricky multi-file step, a coder-tuned sibling (e.g. Qwen3-Coder-30B-A3B-Instruct) can be swapped in for that session — but it's optional. Your current model handles these phases fine given the spec does the heavy lifting.
-
-- **Don't fight the hardware.** If the model starts truncating or hallucinating file contents, the session context is too big — split the phase into its numbered sub-steps and feed them one at a time. Smaller, sharper context beats a bigger window every time on local quant.
+> **On trusting the model more than the last one:** a stronger model needs less hand-holding on *syntax* and exactly as much on *this project's specifics*. The verbatim reference blocks, the locked decisions, and the DO-NOT list are not scaffolding for a weak model — they encode bugs that already happened. Keep them.
 
 ---
 
@@ -78,8 +60,11 @@ opencode loads project rules from **`AGENTS.md`** files (it reads them at the pr
 
 Read the foundation docs in order once, then work the phases.
 
-**Always-on rules:**
-- [`AGENTS.md`](./AGENTS.md) — compact guardrail digest opencode auto-loads every turn (hard rules + DO-NOT list). Keep it in context for every session.
+**Read first, every session:**
+- [`STATE.md`](./STATE.md) — what is actually built, what is next, where the docs have drifted. **The phase files describe intent; this describes reality.**
+- [`SESSION-PROMPT.md`](./SESSION-PROMPT.md) — copy-paste kickoff prompt for opencode, per role (implementer / reviewer / screenshot triage), plus the environment gotchas.
+- [`AGENTS.md`](./AGENTS.md) — compact guardrail digest, auto-loaded every turn (hard rules + DO-NOT list).
+- [`BACKLOG.md`](./BACKLOG.md) — ranked known-missing work that isn't yet a phase file.
 
 **Foundation (read once, keep handy):**
 1. [`01-PROJECT-BRIEF.md`](./01-PROJECT-BRIEF.md) — what & why, the whole system at a glance, the non-negotiables.
@@ -87,15 +72,19 @@ Read the foundation docs in order once, then work the phases.
 3. [`03-CONVENTIONS-AND-GUARDRAILS.md`](./03-CONVENTIONS-AND-GUARDRAILS.md) — coding standards, the *prescriptive* patterns, and the DO-NOT list.
 4. [`04-STACK-SCAFFOLD-AND-CONFIG.md`](./04-STACK-SCAFFOLD-AND-CONFIG.md) — exact dependency versions, every config file, scaffold commands.
 
-**Phases (one feeding session each):**
-- [`phases/phase-0-scaffold.md`](./phases/phase-0-scaffold.md)
-- [`phases/phase-1-db-auth-credentials.md`](./phases/phase-1-db-auth-credentials.md)
-- [`phases/phase-2-automation.md`](./phases/phase-2-automation.md)
-- [`phases/phase-3-frontend.md`](./phases/phase-3-frontend.md)
-- [`phases/phase-4-security.md`](./phases/phase-4-security.md)
-- [`phases/phase-5-deploy-ops.md`](./phases/phase-5-deploy-ops.md)
+**Phases (one feeding session each).** 0–3 and 4A are **built** — read them as an as-built record, don't re-run them:
+- [`phases/phase-0-scaffold.md`](./phases/phase-0-scaffold.md) ✅
+- [`phases/phase-1-db-auth-credentials.md`](./phases/phase-1-db-auth-credentials.md) ✅
+- [`phases/phase-2-automation.md`](./phases/phase-2-automation.md) ✅
+- [`phases/phase-3-frontend.md`](./phases/phase-3-frontend.md) ✅
+- [`phases/phase-4-security.md`](./phases/phase-4-security.md) — 4A ✅ · **4A.2 signup gating** and 4B pending
+- [`phases/phase-5-deploy-ops.md`](./phases/phase-5-deploy-ops.md) — pending
+- [`phases/phase-T-test-harness.md`](./phases/phase-T-test-harness.md) — **next**: integration + e2e harness. Runs before 6; gates everything after it
+- [`phases/phase-6-notifications.md`](./phases/phase-6-notifications.md) — Telegram run notifications + missed-run reconciliation
+- [`phases/phase-7-schedule-pause.md`](./phases/phase-7-schedule-pause.md) — pause / leave days
 
-**Reference (attach to a phase when it says so; the LLM reproduces these verbatim):**
+**Reference (attach to a phase when it says so; reproduce these verbatim):**
+- [`reference/testing-strategy.md`](./reference/testing-strategy.md) — **executable gates; attach to every phase from 6 onward**
 - [`reference/database-schema.md`](./reference/database-schema.md)
 - [`reference/api-contract.md`](./reference/api-contract.md)
 - [`reference/hrhub-automation-playbook.md`](./reference/hrhub-automation-playbook.md)
@@ -107,6 +96,6 @@ Read the foundation docs in order once, then work the phases.
 
 ## The single most important lesson baked into these docs
 
-The original build shipped a bug where the frontend mixed `mutate()` (fire-and-forget) with `await ... mutateAsync()` (promise-based) because the brief *showed both patterns without prescribing which to use where*. A local model will make that mistake ten times out of ten if you give it the chance.
+The original build shipped a bug where the frontend mixed `mutate()` (fire-and-forget) with `await ... mutateAsync()` (promise-based) because the brief *showed both patterns without prescribing which to use where*. Given the choice, a model will take it — and both forms compile, both look idiomatic, and the broken one fails silently by showing "Saved." after a failed save. Model strength doesn't help here; only removing the choice does.
 
 **So: these docs never present two options for the same decision.** They state the one correct pattern, show one correct example, and list the wrong pattern only under a "DO NOT" so the model can recognize and avoid it. Maintain that discipline when you extend them.

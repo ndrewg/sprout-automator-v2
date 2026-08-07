@@ -219,6 +219,22 @@ main().catch((err: unknown) => {
 
 ```
 signup | login_success | login_failure | logout
-password_changed | credentials_updated | schedule_updated
+password_changed | credentials_updated | credentials_deleted | schedule_updated
 ```
-⚑ RECOMMENDED: add `credentials_deleted` (as-built reuses `credentials_updated` with `fields:["deleted_all"]`), and (if you do Phase-4 email flows) `email_verified`, `password_reset_requested`, `password_reset_completed`, `account_deleted`.
+The union lives in `src/lib/audit.ts` and is named **`AuditEventType`**. It is closed — an event not listed there is a compile error, so add yours to the union first.
+
+Added by later phases:
+- Phase 4A.2 (signup gating): `signup_rejected`
+- Phase 6 (notifications): `notification_settings_updated`, `notification_auto_disabled`
+- Phase 4B, if you do the email flows: `email_verified`, `password_reset_requested`, `password_reset_completed`, `account_deleted`
+
+## Tables added by later phases
+
+Not part of the initial migration — specified in their own phase files, listed here so this stays the schema index:
+
+| Table | Phase | Purpose |
+|---|---|---|
+| `notification_settings` | 6 | one row per user: encrypted Telegram bot token, chat ID, four outcome toggles, blocked-count |
+| `missed_run_notices` | 6 | idempotency ledger for the reconciliation sweep; **unique on `(user_id, manila_date, action)`** — that index *is* the "notify once" guarantee |
+
+Phase 7 adds `paused_from` / `paused_until` columns to `schedules` (inclusive Manila-day range).

@@ -29,7 +29,7 @@
 ## 5.3 — Production Dockerfile
 
 Use the multi-stage `Dockerfile` from `04` / `reference/supply-chain-and-ci.md` verbatim. Key properties to preserve:
-- Stage 1 `node:22-alpine` builds the **frontend** with pnpm (`pnpm install --frozen-lockfile` → `pnpm build`) → `dist`.
+- Stage 1 **`node:22-bookworm-slim`** builds the **frontend** with pnpm (`pnpm install --frozen-lockfile` → `pnpm build`) → `dist`. **Debian, not Alpine** — Tailwind v4's native engine (Oxide/lightningcss) has musl friction. (This line previously said `node:22-alpine`, contradicting doc `04`, the supply-chain reference, and the as-built Dockerfile; following it would break the build.)
 - Stage 2 `mcr.microsoft.com/playwright:v1.60.0-noble` (**must match the pinned `playwright@1.60.0`**) installs backend prod deps via `pnpm install --frozen-lockfile --prod`, copies `src`/`drizzle`/`tsconfig`/`drizzle.config.ts`, copies the frontend `dist` → `./public`.
 - Creates `/app/data`, `chown` to `pwuser`, runs as **non-root `pwuser`**.
 - `CMD ["pnpm","exec","tsx","src/index.ts"]` — runs TypeScript directly, no compile.
