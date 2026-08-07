@@ -196,6 +196,31 @@ export const missedRunNotices = pgTable(
   }),
 );
 
+// reset_tokens — single-use password reset links (§4B.3). Only the SHA-256
+// hash of the raw token is stored; the raw value lives only in the emailed
+// link. purpose is free text so a later phase can add 'verify' values without
+// a Postgres enum alteration.
+export const resetTokens = pgTable(
+  "reset_tokens",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    purpose: text("purpose").notNull().default("reset"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    userIdx: index("reset_tokens_user_idx").on(t.userId),
+    tokenHashUnique: uniqueIndex("reset_tokens_token_hash_unique").on(t.tokenHash),
+  }),
+);
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
@@ -205,3 +230,4 @@ export type Run = typeof runs.$inferSelect;
 export type AuditLogEntry = typeof auditLog.$inferSelect;
 export type NotificationSettings = typeof notificationSettings.$inferSelect;
 export type MissedRunNotice = typeof missedRunNotices.$inferSelect;
+export type ResetToken = typeof resetTokens.$inferSelect;

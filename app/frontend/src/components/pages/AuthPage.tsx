@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { useLogin, useSignup } from "@/hooks/useAuth";
+import { useForgotPassword, useLogin, useSignup } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -17,20 +17,36 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 
+// Login / signup / forgot-password card. The password-reset screen lives in
+// ResetPasswordPage (its own URL /reset?token=…) and is rendered by AuthGate
+// BEFORE this one, so it is reachable whether or not a session exists.
+
 export function AuthPage() {
-  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [mode, setMode] = useState<"login" | "signup" | "forgot">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const login = useLogin();
   const signup = useSignup();
-  const active = mode === "login" ? login : signup;
+  const forgot = useForgotPassword();
 
-  // Callback-form mutate is intentional here (non-async handler): success
-  // writes the ["me"] cache which flips AuthGate; errors surface via active.error.
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    active.mutate({ email, password });
+    if (mode === "forgot") {
+      forgot.mutate(email);
+      return;
+    }
+    if (mode === "login") {
+      login.mutate({ email, password });
+    } else {
+      signup.mutate({ email, password });
+    }
   };
+
+  const isPending =
+    mode === "forgot" ? forgot.isPending : mode === "login" ? login.isPending : signup.isPending;
+  const error =
+    mode === "forgot" ? forgot.error : mode === "login" ? login.error : signup.error;
+  const showForgotSuccess = mode === "forgot" && forgot.isSuccess;
 
   return (
     <div className="flex min-h-dvh items-center justify-center p-4">
@@ -40,7 +56,9 @@ export function AuthPage() {
           <CardDescription>
             {mode === "login"
               ? "Sign in to your account"
-              : "Create your account"}
+              : mode === "signup"
+                ? "Create your account"
+                : "Reset your password"}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -57,51 +75,100 @@ export function AuthPage() {
                   required
                 />
               </Field>
-              <Field>
-                <FieldLabel htmlFor="password">Password</FieldLabel>
-                <Input
-                  id="password"
-                  type="password"
-                  autoComplete={
-                    mode === "login" ? "current-password" : "new-password"
-                  }
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  minLength={12}
-                  required
-                />
-                <FieldDescription>At least 12 characters.</FieldDescription>
-              </Field>
-              {active.error ? (
+              {mode !== "forgot" ? (
+                <Field>
+                  <FieldLabel htmlFor="password">Password</FieldLabel>
+                  <Input
+                    id="password"
+                    type="password"
+                    autoComplete={
+                      mode === "login" ? "current-password" : "new-password"
+                    }
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    minLength={12}
+                    required
+                  />
+                  <FieldDescription>At least 12 characters.</FieldDescription>
+                </Field>
+              ) : null}
+              {showForgotSuccess ? (
+                <Alert variant="success">
+                  <AlertTitle>Check your email</AlertTitle>
+                  <AlertDescription>
+                    If an account exists for that address, a password reset link
+                    is on its way.
+                  </AlertDescription>
+                </Alert>
+              ) : error ? (
                 <Alert variant="destructive">
                   <AlertTitle>
-                    {mode === "login" ? "Login failed" : "Sign up failed"}
+                    {mode === "login"
+                      ? "Login failed"
+                      : mode === "signup"
+                        ? "Sign up failed"
+                        : "Couldn't send reset link"}
                   </AlertTitle>
                   <AlertDescription>
-                    {active.error instanceof Error
-                      ? active.error.message
+                    {error instanceof Error
+                      ? error.message
                       : "Something went wrong"}
                   </AlertDescription>
                 </Alert>
               ) : null}
-              <Button type="submit" disabled={active.isPending}>
-                {active.isPending
+              <Button type="submit" disabled={isPending}>
+                {isPending
                   ? "Please wait…"
                   : mode === "login"
                     ? "Sign in"
-                    : "Sign up"}
+                    : mode === "signup"
+                      ? "Sign up"
+                      : "Send reset link"}
               </Button>
             </FieldGroup>
           </form>
-          <Button
-            variant="link"
-            className="mt-2 w-full"
-            onClick={() => setMode(mode === "login" ? "signup" : "login")}
-          >
-            {mode === "login"
-              ? "Need an account? Sign up"
-              : "Have an account? Sign in"}
-          </Button>
+          <div className="mt-2 flex flex-col">
+            {mode === "login" ? (
+              <Button
+                variant="link"
+                className="w-full"
+                onClick={() => {
+                  setMode("forgot");
+                  setEmail("");
+                  setPassword("");
+                }}
+              >
+                Forgot password?
+              </Button>
+            ) : null}
+            {mode === "login" ? (
+              <Button
+                variant="link"
+                className="w-full"
+                onClick={() => setMode("signup")}
+              >
+                Need an account? Sign up
+              </Button>
+            ) : null}
+            {mode === "signup" ? (
+              <Button
+                variant="link"
+                className="w-full"
+                onClick={() => setMode("login")}
+              >
+                Have an account? Sign in
+              </Button>
+            ) : null}
+            {mode === "forgot" ? (
+              <Button
+                variant="link"
+                className="w-full"
+                onClick={() => setMode("login")}
+              >
+                Back to sign in
+              </Button>
+            ) : null}
+          </div>
         </CardContent>
       </Card>
     </div>

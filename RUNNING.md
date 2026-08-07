@@ -161,3 +161,11 @@ cd app/frontend && pnpm dev      # Vite HMR on :5173  ← open THIS in dev
 Open **http://localhost:5173** (Vite proxies the API to :3000). Requires Node 22+
 and `corepack enable pnpm` on the host. This is for editing code, not for
 unattended runs.
+
+**Testing password reset locally:** with no mail provider, the reset email is
+logged to the backend console, and the link in it points at `APP_URL`. The
+default is `http://localhost:3000` — right for the Docker build, but in this
+dev loop that port serves whatever stale bundle is in `app/backend/public`. Set
+`APP_URL=http://localhost:5173` in `.env` (and restart the backend) so reset
+links land on the Vite SPA. You can also test the *logged-out* flow on :5173
+directly at `/reset?token=…`.

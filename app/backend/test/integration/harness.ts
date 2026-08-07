@@ -4,6 +4,7 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { sql } from "drizzle-orm";
 import { app } from "../../src/app";
 import { db, pool } from "../../src/db/client";
+import { resetRateLimits } from "../../src/middleware/security";
 import type { User } from "../../src/db/schema";
 
 // Integration harness: real Express app on an ephemeral port + real Postgres
@@ -43,13 +44,20 @@ export async function setupDatabase(): Promise<void> {
 
 /**
  * Between tests: wipe every table, cascading from users. Fast and total.
+ *
+ * Also clears the in-memory rate-limit stores: authLimiter is 10/15min per IP
+ * and the integration project runs single-fork, so a file that legitimately
+ * issues more than ten auth requests (password-reset) would otherwise starve
+ * itself and every later file — exactly like leaving rows in the database. No
+ * NODE_ENV==="test" bypass: the limiter stays enforced in the one place it is.
  */
 export async function resetDatabase(): Promise<void> {
   await db.execute(sql`
     TRUNCATE users, runs, sessions, credentials, schedules, audit_log,
-             notification_settings, missed_run_notices
+             notification_settings, missed_run_notices, reset_tokens
     RESTART IDENTITY CASCADE
   `);
+  await resetRateLimits();
 }
 
 // --- Server -----------------------------------------------------------------

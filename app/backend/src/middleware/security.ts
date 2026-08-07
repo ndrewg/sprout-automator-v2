@@ -1,7 +1,31 @@
 import helmet from "helmet";
-import { rateLimit } from "express-rate-limit";
+import { rateLimit, MemoryStore } from "express-rate-limit";
+import { config } from "../config";
 
 // The ONLY module that imports helmet / express-rate-limit (§03 module ownership).
+
+// Stores are constructed explicitly and held here so the test harness can clear
+// them between tests exactly as it truncates the database. authLimiter is ONE
+// instance mounted on several paths, so all its mount points share a single
+// budget (that is intended — see the rate-limit design in app.ts); the shared
+// store is the same thing seen from the other side.
+const authLimiterStore = new MemoryStore();
+const apiLimiterStore = new MemoryStore();
+const notificationsTestLimiterStore = new MemoryStore();
+
+/**
+ * Clears every in-memory rate-limit store. Called by the integration harness's
+ * per-test reset alongside resetDatabase(): authLimiter is 10/15min per IP and
+ * the integration project runs single-fork, so a suite that legitimately issues
+ * more than ten auth requests (e.g. password-reset) would starve itself and
+ * every later file without a reset. Deliberately NOT a NODE_ENV==="test" bypass
+ * — that would leave the guard unexercised in the one place it is enforced.
+ */
+export async function resetRateLimits(): Promise<void> {
+  await authLimiterStore.resetAll();
+  await apiLimiterStore.resetAll();
+  await notificationsTestLimiterStore.resetAll();
+}
 
 /**
  * Strict security headers (CSP + HSTS + the helmet defaults like
@@ -39,10 +63,11 @@ export const securityHeaders = helmet({
   },
 });
 
-/** Auth endpoints: 10 requests / 15 minutes per IP. */
+/** Auth endpoints: AUTH_RATE_LIMIT (default 10) requests / 15 minutes per IP. */
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 10,
+  limit: config.AUTH_RATE_LIMIT,
+  store: authLimiterStore,
   standardHeaders: "draft-7",
   legacyHeaders: false,
   message: { error: "Too many attempts. Please try again later." },
@@ -52,6 +77,7 @@ export const authLimiter = rateLimit({
 export const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
   limit: 120,
+  store: apiLimiterStore,
   standardHeaders: "draft-7",
   legacyHeaders: false,
   message: { error: "Too many requests. Please slow down." },
@@ -65,6 +91,7 @@ export const apiLimiter = rateLimit({
 export const notificationsTestLimiter = rateLimit({
   windowMs: 10_000,
   limit: 1,
+  store: notificationsTestLimiterStore,
   keyGenerator: (req) => `notif-test:${req.user?.id ?? "anon"}`,
   standardHeaders: "draft-7",
   legacyHeaders: false,

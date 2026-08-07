@@ -2,7 +2,7 @@
 
 Read this first, before any phase file. The phase docs describe a *plan*; this describes the *reality*. When they disagree, this file wins and the phase file needs a correction note.
 
-Last updated: **2026-08-07**. Phases T, 6, 7 and 4A.2 all built, reviewed and committed in one session (`ccc6f30`, `a81c96d`, `e6c81f9`, + signup gating). Every `[manual]` check for 6 and 7 passed against live Telegram and live HRHub, except the phase-6 success ✅ notification, which is deferred because it cannot be produced without a real clock action. Phase 6 is tagged; T and 7 are not.
+Last updated: **2026-08-07**. Phases T, 6, 7, 4A.2 and 4B.1/4B.3/4B.4 all built, reviewed and committed. Phase 4B split: mailer + password reset (round 1) done; email verification, account deletion, data export and monitoring (round 2) deferred. Every `[manual]` check passed. Phase 6 is tagged; T, 7 and 4B are not (4B incomplete until round 2).
 
 ---
 
@@ -21,6 +21,7 @@ Last updated: **2026-08-07**. Phases T, 6, 7 and 4A.2 all built, reviewed and co
 | React 19 / Tailwind 4 / shadcn SPA, four panels, responsive | ✅ | tag `phase-3-complete` |
 | SPA served from Express in the production image | ✅ | tag `phase-3-complete` |
 | Helmet CSP + HSTS, rate limits, trust proxy, body cap | ✅ | commit `21a0971` — **4A only, not tagged** |
+| Transactional email mailer + password reset + idle session timeout | ✅ | **4B.1/4B.3/4B.4** — environment-dependent dev/prod logging, single-use tokens, resettable rate-limit store for tests, 11th-is-429 property asserted at default. All nine `[manual]` checks passed. **Not yet tagged** (round 2 remains) |
 | Test harness: `app.ts`/`index.ts` split, vitest unit+integration projects, 23 integration tests, Playwright e2e | ✅ | phase T — `[manual]` Docker check passed; not yet tagged |
 | Run notifications + missed-run reconciliation | ✅ | commit `a81c96d`; six review rounds (defects 3, 12, 17, 18, 19, 20). `[manual]`: settings round-trip, test button, rate limit, enable guard, encrypted-at-rest, failure ⚠️, skipped ℹ️, missed 🔴 (incl. no-duplicate) all verified live — see `reviews/phase-6-addendum.md` § E. Success ✅ deferred (needs a real clock action). **Not yet tagged** |
 | Signup gating — email allowlist (§ 4A.2) | ✅ | `SIGNUP_ALLOWED` takes domains and exact addresses; optional in dev (allow-all + warning), **required in production or the app refuses to boot**. All six `[manual]` checks passed live, including the substring attack (`notorchard.com.au` → 403) and grandfathering (an address removed from the list could no longer sign up but still logged in). Rejections audit an `emailHash` only. See `reviews/phase-4A2-addendum.md`. **Not yet tagged** |
@@ -32,7 +33,7 @@ The app runs today via `docker compose up -d --build` on `http://localhost:3000`
 
 | Area | Where it's specified | Blocking? |
 |---|---|---|
-| Account lifecycle: email verify, password reset, idle timeout, deletion, export | `phases/phase-4-security.md` § 4B | before inviting >3 people |
+| Account lifecycle: email verification (4B.2), account deletion (4B.5), data export (4B.6), monitoring hooks (4B.7) | `phases/phase-4-security.md` § 4B | before inviting >3 people (4B.1/4B.3/4B.4 done in round 1) |
 | TLS deploy: `docker-compose.prod.yml`, `Caddyfile`, `DEPLOY.md`, backups | `phases/phase-5-deploy-ops.md` | before leaving the LAN |
 | Everything else | `BACKLOG.md` | ranked there |
 

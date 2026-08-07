@@ -14,7 +14,9 @@ export type AuditEventType =
   | "credentials_deleted"
   | "schedule_updated"
   | "notification_settings_updated"
-  | "notification_auto_disabled";
+  | "notification_auto_disabled"
+  | "password_reset_requested"
+  | "password_reset_completed";
 
 export type AuditContext = {
   userId?: string | null;

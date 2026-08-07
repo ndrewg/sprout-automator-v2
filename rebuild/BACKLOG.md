@@ -20,36 +20,45 @@ Cheap after Phase 6, because a notification tells you when it finally gave up. N
 
 Prune `screenshots/<userId>/<runId>/` older than ~14 days. Keep failures longer than successes if it's easy — those are the ones with forensic value. A nightly cron in the container or a host-level job; either is fine.
 
-## 3. Admin visibility
+## 3. IP-keyed auth limiter locks out a whole team behind one NAT
+
+**Without it:** every colleague on the same corporate network is one shared IP. `authLimiter` is 10 requests / 15 minutes keyed by IP, and since 4B it covers login, signup, forgot-password and reset as a single shared budget. A few people fumbling passwords the same morning exhaust it for everyone — the rest get "Too many attempts. Please try again later." on their very first try of the day, with no hint that a colleague is the cause. Pre-existing for login+signup; adding the two reset endpoints makes it likelier to bite.
+
+Options, for a deliberate decision rather than a default (do not pick by implementation convenience):
+- **Raise the budget** (e.g. 10 → 30 / 15 min). Cheapest; a small team rarely needs the defence 10 provides.
+- **Key attempts by email** with a looser IP-keyed backstop (per-account 5/15 min, per-IP 30/15 min). Correct semantics — a brute-forcer targets one account, not the IP — but needs a per-email counter that also covers the "no such user" path (key on the *submitted* email, which login already lowercases).
+- **Give the reset endpoints their own limiter** so a reset flow can't consume the login budget and vice versa. Simplest behavioural fix; still leaves two humans sharing one budget within a single endpoint.
+
+## 4. Admin visibility
 
 **Without it:** you find out a colleague's automation has been broken for a week when they tell you.
 
 `users.is_admin` exists, is returned by `publicUser`, and gates nothing. `phase-4-security.md` § 4B.7 sketches this. Minimum useful version: an admin-only read endpoint listing each user's last run per action with status and timestamp. Not impersonation, not credential access — just "whose automation is failing". Rank rises sharply the moment you onboard anyone.
 
-## 4. OTP submission via Telegram reply
+## 5. OTP submission via Telegram reply
 
 **Without it:** the manual OTP fallback is unusable in the one scenario it was built for. At 05:30 you are asleep; if IMAP is slow the run waits five minutes and dies. The dashboard paste-in box only helps someone already awake and watching.
 
 > **Unblocked (2026-08-07):** phase 6 landed the Telegram transport (`lib/telegram.ts`), the notification settings row, and the settings routes — the channel now exists. What remains is the interactive half: a run waiting for OTP could ask, and a reply could satisfy the bridge. Needs either long-polling `getUpdates` or a webhook (a webhook means a public HTTPS endpoint, so realistically post-Phase-5), plus care that a code arriving from Telegram is bound to the right `runId`. Real work, real payoff.
 
-## 5. Session hardening leftovers
+## 6. Session hardening leftovers
 
 Idle session timeout (`phase-4-security.md` § 4B.4) is a one-line comparison in `findValidSession` and limits the blast radius of a stolen cookie. The rest of 4B (email verification, password reset, account deletion, export) matters once real colleagues are on it — and password reset in particular, because right now a forgotten password is unrecoverable without database surgery.
 
-## 6. Adopted-but-unbuilt improvements from `02-DECISIONS-AND-ARCHITECTURE.md`
+## 7. Adopted-but-unbuilt improvements from `02-DECISIONS-AND-ARCHITECTURE.md`
 
 Small, listed there, still open:
 - **#5** — type the `useRuns` refetch callback instead of `(query: any)`. The one `any` in the data layer.
 - **#7** — explicit `QueryClient` defaults (`staleTime`, `retry: 1`, `retry: false` for `useMe`). Partly done; verify.
 - `credentials_deleted` as a distinct audit event — **done** (the union has it).
 
-## 7. Documentation drift
+## 8. Documentation drift
 
 - `04-STACK-SCAFFOLD-AND-CONFIG.md` still targets Vite 6 / TS 5.6; as-built is Vite 8 / TS 6 (corrected only in `phase-3-frontend.md`'s margin note).
 - `04`'s repo layout lists a `DEPLOY.md` that doesn't exist — Phase 5 will create it.
 - `phase-5-deploy-ops.md` § 5.3 says the frontend build stage is `node:22-alpine`; the actual Dockerfile and doc `04` both say `node:22-bookworm-slim` (Debian, for Tailwind v4's native engine). The Alpine mention is stale and would break the build if followed.
 
-## 8. Onboarding material + the Gmail-only constraint in the fine print
+## 9. Onboarding material + the Gmail-only constraint in the fine print
 
 **Without it:** a colleague gets halfway through setup, discovers the OTP reader only speaks to Gmail, and stops.
 
@@ -61,13 +70,13 @@ Two places this needs to appear, and the order matters:
 
 Also worth stating plainly in both: a missed-run alert means "the automation didn't run", not "you aren't clocked in" — someone who clocked in manually will still get one.
 
-## 9. `_archive/` still contains live secrets
+## 10. `_archive/` still contains live secrets
 
 Not a feature — a liability. It holds a real `.env` and session cookies; `reference/supply-chain-and-ci.md` cites it as the near-miss that motivated the gitleaks hook. It is gitignored, so this is about what sits in the working tree and any backup of it, not about the repository.
 
 The rebuild is complete and validated against live HRHub. Nothing in `_archive/` is referenced by any phase, and the guardrails forbid reading it. **Delete it** (and rotate anything it contains that is still valid). Left alone it will eventually be copied to a laptop, a backup, or a shared drive by someone who doesn't know what's in it.
 
-## 10. Missed-run notice can still be lost on the very first send
+## 11. Missed-run notice can still be lost on the very first send
 
 **Without it:** the reconciliation sweep inserts the `missed_run_notices` row **before** dispatching (D6 — the DB decides who sends). If every retry of that send fails (a long Telegram outage), the row exists but the user was never told, and no later sweep will retry it — the notice is permanently silent. The defect-17/18 transport retry makes a lost send rare but not impossible, and the missed alert is the one where silence is worst (the whole point of the feature).
 

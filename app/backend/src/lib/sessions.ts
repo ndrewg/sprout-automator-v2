@@ -2,8 +2,11 @@ import { eq, lt } from "drizzle-orm";
 import { db } from "../db/client";
 import { sessions, type Session } from "../db/schema";
 
-// 30-day absolute TTL.
+// 30-day absolute TTL, plus a 7-day idle timeout (§4B.4): a session dies at
+// whichever comes first — 30 days since creation, or 7 days since it was last
+// used. Both are enforced in findValidSession below.
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const SESSION_IDLE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export async function createSession(params: {
   userId: string;
@@ -36,6 +39,13 @@ export async function findValidSession(
 
   if (row.expiresAt.getTime() <= Date.now()) {
     // Expired — delete and treat as no session.
+    await deleteSession(sessionId);
+    return null;
+  }
+
+  // Idle timeout (4B.4): a session unused for 7 days is dead even though its
+  // absolute TTL hasn't elapsed. Deleted, so the row can't be resurrected.
+  if (Date.now() - row.lastUsedAt.getTime() > SESSION_IDLE_TTL_MS) {
     await deleteSession(sessionId);
     return null;
   }

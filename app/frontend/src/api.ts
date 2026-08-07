@@ -60,6 +60,16 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
   logout: () => request<{ ok: true }>("/auth/logout", { method: "POST" }),
+  forgotPassword: (email: string) =>
+    request<{ ok: true }>("/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+  resetPassword: (token: string, newPassword: string) =>
+    request<{ ok: true }>("/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, newPassword }),
+    }),
 
   getCredentials: () => request<{ credentials: CredentialsView }>("/credentials"),
   putCredentials: (patch: Record<string, string | null>) =>

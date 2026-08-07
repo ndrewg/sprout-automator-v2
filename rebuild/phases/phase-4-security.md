@@ -62,7 +62,17 @@ Whichever you choose: fail with the **same generic message** regardless of *why*
 These are deferred in the original roadmap. As the senior engineer I recommend doing them before onboarding more than a couple of trusted people, because they close real holes (no way to recover an account, sessions that never idle out, no clean offboarding).
 
 ### 4B.1 — Email infrastructure
-Pick a transactional email provider; **Resend** is the least-friction (`resend` npm SDK, one API key). Add `RESEND_API_KEY` + `MAIL_FROM` to `config.ts` (optional in dev — if unset, log the email to console instead of sending, so dev doesn't need a provider). Create `src/lib/mailer.ts` with `sendMail({to,subject,html})`; **never** put secrets/tokens-in-plaintext-logs through it. All token *values* go only in the emailed link, never in audit metadata.
+Pick a transactional email provider; **Resend** is the least-friction (`resend` npm SDK, one API key). Add `RESEND_API_KEY` + `MAIL_FROM` to `config.ts` (optional in dev — if unset, handle the email in-process instead of sending, so dev doesn't need a provider). Create `src/lib/mailer.ts` with `sendMail({to,subject,html})`.
+
+The no-provider fallback is **environment-dependent**, not just provider-dependent:
+- `NODE_ENV !== "production"` (dev/test): log the **full message including the link** at `info`. The link is the entire point of the fallback — without it a password reset cannot be completed.
+- `NODE_ENV === "production"`: log **recipient + subject only** and a loud `warn` that reset emails cannot be delivered until `RESEND_API_KEY` and `MAIL_FROM` are set. Do **not** refuse to start — a self-hosted operator without mail still gets a working app, minus reset. A reset link in a production log file would be a live credential, so the body never appears here.
+- Provider configured: send via Resend; **never** log the body.
+
+Token *values* go only in the emailed (or, in dev, logged) link, never in audit metadata.
+> ⚠️ **As-built (found 2026-08):** the round-1 prompt said the dev fallback must "never log the email body or any token", which made the reset flow unusable without a provider — the link was neither sent nor logged, and only its hash was stored. The correct rule is the environment-dependent one above: the full message (link included) is logged in dev, and only recipient + subject in production. Do not "tighten" the dev branch to drop the body; that re-introduces the defect.
+
+> ⚠️ **As-built (found 2026-08, rate-limiting fix):** `POST /auth/forgot-password` and `POST /auth/reset-password` must be rate-limited (both are unauthenticated — one sends email, the other accepts an unauthenticated token). Both are now mounted behind `authLimiter` in `app.ts`. The limiter store is resettable via `resetRateLimits()` (exported from `middleware/security.ts`) and called from the integration harness, so tests can legitimately exceed the 10/15min budget without consuming a separate IP-based budget. An `AUTH_RATE_LIMIT` config key allows operators to adjust the limit (e.g., for NAT scenarios) without code changes; the default is 10 and the 11th-is-429 property is asserted in the integration suite. Shared NAT issue noted in BACKLOG.md § "rate limiting under NAT".
 
 ### 4B.2 — Email verification on signup
 - New table `email_tokens` (or reuse a generic `tokens` table): `id`, `userId` (cascade), `tokenHash` (Argon2id or SHA-256 of a 32-byte random token — store the **hash**, email the **raw**), `purpose` (`'verify'|'reset'`), `expiresAt`, `usedAt`. Generate the raw token as `randomBytes(32).toString("base64url")`.

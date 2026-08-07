@@ -66,6 +66,12 @@ app.use(attachUser);
 // authenticated API is generous. /health is intentionally left unthrottled.
 app.use("/auth/login", authLimiter);
 app.use("/auth/signup", authLimiter);
+// Both reset endpoints are unauthenticated and belong to the same family as
+// login: /auth/forgot-password sends email (so it is a mailbox-flooding and
+// account-probing surface) and /auth/reset-password takes an unauthenticated
+// token. authLimiter is one instance, so all four mount points share a budget.
+app.use("/auth/forgot-password", authLimiter);
+app.use("/auth/reset-password", authLimiter);
 app.use("/credentials", apiLimiter);
 app.use("/schedule", apiLimiter);
 app.use("/runs", apiLimiter);

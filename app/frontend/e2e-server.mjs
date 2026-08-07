@@ -45,6 +45,12 @@ const backendEnv = {
   SESSION_SECRET: "e2e-session-secret-not-for-production-123456789",
   SPROUT_URL: "http://127.0.0.1:9/",
   SIGNUP_ALLOWED: "example.com",
+  // Every e2e flow runs in ~20s against one shared IP, and with the reset
+  // endpoints behind authLimiter the suite now issues more auth requests than
+  // the default 10/15min budget allows. Raise it here: e2e exercises flows,
+  // not limits — the 11th-is-429 property is asserted by the integration suite
+  // (signup-rate-limit.test.ts) at the default budget.
+  AUTH_RATE_LIMIT: "100",
 };
 
 // Migrate the test database (the backend does not auto-migrate).

@@ -18,6 +18,22 @@ const envSchema = z.object({
   // Optional outside production (unset = open signup, logged as a warning at
   // startup); REQUIRED in production — see the check in loadConfig.
   SIGNUP_ALLOWED: z.string().optional(),
+  // Public base URL for emailed links (password reset, later verify). Dev
+  // default is the local backend, which serves the built SPA in the production
+  // image; set APP_URL to the real origin in production.
+  APP_URL: z.string().url().default("http://localhost:3000"),
+  // Email (§4B.1): both optional. When either is unset, mailer.ts logs the
+  // email (recipient + subject only) instead of sending, so dev needs no
+  // provider and no reset token ever reaches a log file.
+  RESEND_API_KEY: z.string().optional(),
+  MAIL_FROM: z.string().optional(),
+  // Auth rate-limit budget: requests per 15 min per IP, shared across login,
+  // signup, forgot-password and reset (one authLimiter instance). Configurable
+  // so a deploy that legitimately exceeds 10 — e.g. a team behind one NAT — can
+  // raise it without a code change, and so the e2e suite (which exercises
+  // flows, not limits) can set its own headroom. The 11th-is-429 property is
+  // asserted by the integration suite at the default.
+  AUTH_RATE_LIMIT: z.coerce.number().int().min(1).max(1000).default(10),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;
