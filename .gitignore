@@ -16,6 +16,10 @@ app/backend/public/
 # Logs
 *.log
 
+# curl cookie jars from manual API testing — these hold live session ids
+*.jar
+cookies.txt
+
 # Test artifacts (Playwright writes these on every run)
 test-results/
 playwright-report/
