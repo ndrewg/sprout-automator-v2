@@ -59,6 +59,23 @@ Ordered by "an agentic model will regress this and nothing will notice."
 
 ---
 
+## Known blind spot: Migrations generated but not applied to dev
+
+**The problem:** A phase that generates a new migration (e.g., Phase 7's `0002_pause.sql`) will pass all automated gates — `pnpm typecheck`, `pnpm test`, `pnpm test:integration` — because the integration test suite migrates `sprout_test` on startup. But the developer's local app (`pnpm dev`) crashes on boot with missing columns, because the dev `sprout` database was never updated.
+
+**Why it happens:** The gates run tests against `sprout_test` (which gets migrated fresh), not the dev database the implementer is using for manual testing. A phase with a `[manual]` gate like "confirm the UI renders" would catch this; a phase with only automated gates will not.
+
+**The fix:** Any phase generating a migration should include a `[manual]` gate item like:
+```
+Apply the migration to the dev database:
+  pnpm exec tsx --env-file=../../.env src/db/migrate.ts
+Then verify `pnpm dev` boots without errors.
+```
+
+Or: add a startup log line listing the latest applied migration so a mismatch is obvious.
+
+---
+
 ## Mechanics
 
 **Layout** — `test/` mirroring `src/` (already established): `test/lib/`, `test/services/`, `test/routes/`. `tsconfig.json` includes `test/**/*` so `tsc --noEmit` type-checks them.

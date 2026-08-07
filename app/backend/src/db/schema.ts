@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -84,6 +85,11 @@ export const schedules = pgTable("schedules", {
   clockInTime: time("clock_in_time").notNull().default("05:30:00"),
   clockOutTime: time("clock_out_time").notNull().default("18:05:00"),
   enabled: boolean("enabled").notNull().default(true),
+  // Inclusive Manila-calendar-day range during which automation is suppressed
+  // (phase 7). date, not timestamp: these are calendar days, not instants, and
+  // YYYY-MM-DD strings compare correctly with <= / >=. Both set or both null.
+  pausedFrom: date("paused_from"),
+  pausedUntil: date("paused_until"),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

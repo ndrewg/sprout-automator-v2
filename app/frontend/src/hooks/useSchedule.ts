@@ -15,6 +15,8 @@ export function useUpdateSchedule() {
       clockInTime?: string;
       clockOutTime?: string;
       enabled?: boolean;
+      pausedFrom?: string | null;
+      pausedUntil?: string | null;
     }) => api.putSchedule(patch),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["schedule"] }),
   });

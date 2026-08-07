@@ -29,6 +29,9 @@ export type ScheduleView = {
   enabled: boolean;
   updatedAt: string | null;
   configured: boolean;
+  pausedFrom: string | null;
+  pausedUntil: string | null;
+  pausedToday: boolean;
   today: { date: string; holiday: string | null };
 };
 
@@ -75,6 +78,8 @@ export const api = {
     clockInTime?: string;
     clockOutTime?: string;
     enabled?: boolean;
+    pausedFrom?: string | null;
+    pausedUntil?: string | null;
   }) =>
     request<{ schedule: ScheduleView }>("/schedule", {
       method: "PUT",

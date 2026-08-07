@@ -78,18 +78,25 @@ No body. Reads the stored (decrypted) Gmail email + app password, runs `testImap
   enabled: boolean,
   updatedAt: string | null,// ISO
   configured: boolean,     // false until first PUT
+  pausedFrom: string | null, // "YYYY-MM-DD" Manila day, inclusive; set/cleared as a pair
+  pausedUntil: string | null,// inclusive
+  pausedToday: boolean,    // server-computed; the UI must not recompute Manila dates
   today: { date: string /* YYYY-MM-DD Manila */, holiday: string | null }
 }
 ```
 
 ### `GET /schedule`
-- `200 { "schedule": ScheduleView }`. No row yet → defaults `05:30:00`/`18:05:00`, `enabled:false`, `configured:false`, with `today` populated.
+- `200 { "schedule": ScheduleView }`. No row yet → defaults `05:30:00`/`18:05:00`, `enabled:false`, `configured:false`, `pausedFrom`/`pausedUntil` `null`, `pausedToday:false`, with `today` populated.
 
 ### `PUT /schedule`  *(lazy-creates the row)*
-Body (all optional, `.strict()`): `{ clockInTime?: "HH:MM"|"HH:MM:SS", clockOutTime?: same, enabled?: boolean }`.
+Body (all optional, `.strict()`): `{ clockInTime?: "HH:MM"|"HH:MM:SS", clockOutTime?: same, enabled?: boolean, pausedFrom?: "YYYY-MM-DD"|null, pausedUntil?: same }`.
 Time regex: `^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$`. `"HH:MM"` is normalized to `"HH:MM:SS"`.
+Date regex: `/^\d{4}-\d{2}-\d{2}$/` (Manila calendar day; nullable). The pause window is a **pair**: send both, both `null` (clears), or neither.
 - `200 { "schedule": ScheduleView }`. Upserts the row, then **atomically** registers (if enabled) or unregisters the user's cron tasks. Audits `schedule_updated`.
 - `400 { "error": "No fields to update" }` if empty body.
+- `400 { "error": "Provide both pausedFrom and pausedUntil, or neither." }` if exactly one side is present (or one side is `null`).
+- `400 { "error": "pausedUntil must be on or after pausedFrom" }` for a reversed range.
+- `400 { "error": "That pause window has already ended." }` if `pausedUntil` is in the past.
 
 ---
 

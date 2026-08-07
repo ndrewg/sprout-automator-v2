@@ -87,9 +87,11 @@ In `SchedulePanel`, below the time inputs:
 
 Tomorrow's Manila date must come from the server (`schedule.today.date` + 1 day is fine to compute client-side from that string; do **not** use the browser's local date — a colleague travelling puts the browser in the wrong timezone and skips the wrong day).
 
-**Gate 7B:** set a pause covering today → banner appears, and the next scheduled fire creates no run; "Skip tomorrow" sets both dates correctly; clearing restores normal operation; the window auto-expires without user action (set a range ending yesterday → `pausedToday` false).
+**Gate 7B:** set a pause covering today → banner appears, and the next scheduled fire creates no run; "Skip tomorrow" sets both dates correctly; clearing restores normal operation; the window auto-expires without user action (update the DB directly to set `paused_until` to yesterday — the API correctly rejects past windows — then `GET /schedule` and verify `pausedToday` is false).
 
 ---
+
+> ⚠️ **As-built (found 2026-08):** Gate 7B initial wording ("set a range ending yesterday → `pausedToday` false") was inconsistent with the validation layer, which correctly rejects `pausedUntil` in the past. Corrected the gate to instruct direct DB update instead (as shown in the integration test). No code change — validation is correct.
 
 ## Deliberately out of scope
 

@@ -12,7 +12,7 @@ import {
 import { decryptOptional } from "../lib/encryption";
 import { recordAudit } from "../lib/audit";
 import { logger } from "../lib/logger";
-import { isPhilippineHoliday, manilaDateString } from "../lib/ph-holidays";
+import { isPausedOn, isPhilippineHoliday, manilaDateString } from "../lib/ph-holidays";
 import { stripAnsi, truncateText } from "../lib/text";
 import {
   escapeHtml,
@@ -324,6 +324,10 @@ export async function sweepMissedRuns(
     const rows = await deps.loadEnabledSchedules();
 
     for (const row of rows) {
+      // A paused day is not a missed run — alerting on it would train the user
+      // to ignore the alerts. Same rule as fireCron: skip, don't notify.
+      if (isPausedOn(row, now)) continue;
+
       for (const action of ["in", "out"] as const) {
         const timeStr = action === "in" ? row.clockInTime : row.clockOutTime;
         const expected = expectedFireTime(todayStr, timeStr);

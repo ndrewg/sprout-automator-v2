@@ -130,4 +130,31 @@ describe("missed-run reconciliation sweep", () => {
       .limit(1);
     expect(notice?.action).toBe("out");
   });
+
+  it("a paused day is not a missed run: neither action alerts", async () => {
+    const { userId } = await userWithSchedule();
+    // Pause window covers FIXED_NOW (2026-08-10). Without the pause skip the
+    // in-run would be 40min overdue and would alert — so an empty `sent` proves
+    // the skip, not a missing schedule.
+    await db
+      .update(schedules)
+      .set({ pausedFrom: "2026-08-10", pausedUntil: "2026-08-14" })
+      .where(eq(schedules.userId, userId));
+    const sent: string[] = [];
+    const deps = {
+      ...defaultSweepDeps,
+      now: () => FIXED_NOW,
+      isWorkday: () => true,
+      dispatchMissed: async (_uid: string, html: string) => {
+        sent.push(html);
+        return "sent" as const;
+      },
+    };
+
+    await sweepMissedRuns(deps);
+    expect(sent).toHaveLength(0);
+    expect(
+      await db.$count(missedRunNotices, eq(missedRunNotices.userId, userId)),
+    ).toBe(0);
+  });
 });

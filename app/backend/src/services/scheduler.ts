@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/client";
 import { schedules, type Schedule } from "../db/schema";
 import { logger } from "../lib/logger";
-import { isPhilippineHoliday } from "../lib/ph-holidays";
+import { isPausedOn, isPhilippineHoliday } from "../lib/ph-holidays";
 import { startRun } from "./runs";
 import { sweepMissedRuns } from "./notifications";
 import type { ClockAction } from "../automation/clock";
@@ -94,11 +94,16 @@ export function startMissedRunSweep(): void {
 }
 
 /**
- * Fired by cron. Holiday check FIRST, then enqueue a run. Must never throw
- * across the cron boundary, and does NOT await execution.
+ * Fired by cron. Holiday check FIRST, then the pause window, then enqueue a
+ * run. Must never throw across the cron boundary, and does NOT await execution.
+ * The `now` param is for tests only — the cron call path uses the default.
  */
-async function fireCron(userId: string, action: ClockAction): Promise<void> {
-  const holiday = isPhilippineHoliday();
+export async function fireCron(
+  userId: string,
+  action: ClockAction,
+  now: Date = new Date(),
+): Promise<void> {
+  const holiday = isPhilippineHoliday(now);
   if (holiday) {
     logger.info(
       { userId, action, holiday },
@@ -107,6 +112,25 @@ async function fireCron(userId: string, action: ClockAction): Promise<void> {
     return;
   }
   try {
+    const [schedule] = await db
+      .select()
+      .from(schedules)
+      .where(eq(schedules.userId, userId))
+      .limit(1);
+    if (schedule && isPausedOn(schedule, now)) {
+      // Pause window covers today: suppress automation, exactly like a holiday.
+      // Values are not secrets — log them so the skip is explainable.
+      logger.info(
+        {
+          userId,
+          action,
+          pausedFrom: schedule.pausedFrom,
+          pausedUntil: schedule.pausedUntil,
+        },
+        "skipping scheduled run — paused window",
+      );
+      return;
+    }
     const result = await startRun({ userId, action });
     if (result.ok) {
       logger.info(

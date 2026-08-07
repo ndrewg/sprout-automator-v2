@@ -23,6 +23,7 @@ Last updated: **2026-08-07**. Phase 6 complete and committed (`a81c96d`); all `[
 | Helmet CSP + HSTS, rate limits, trust proxy, body cap | ✅ | commit `21a0971` — **4A only, not tagged** |
 | Test harness: `app.ts`/`index.ts` split, vitest unit+integration projects, 23 integration tests, Playwright e2e | ✅ | phase T — `[manual]` Docker check passed; not yet tagged |
 | Run notifications + missed-run reconciliation | ✅ | commit `a81c96d`; six review rounds (defects 3, 12, 17, 18, 19, 20). `[manual]`: settings round-trip, test button, rate limit, enable guard, encrypted-at-rest, failure ⚠️, skipped ℹ️, missed 🔴 (incl. no-duplicate) all verified live — see `reviews/phase-6-addendum.md` § E. Success ✅ deferred (needs a real clock action). **Not yet tagged** |
+| Pause / leave days (schedule pause window + controls) | ✅ | gates 7A + 7B green; manual checks: pause banner appears, skip tomorrow works, clear restores normal. See `reviews/phase-7-addendum.md`. **[manual] gate:** apply the `0002_pause.sql` migration to the dev DB before testing (`pnpm exec tsx --env-file=../../.env src/db/migrate.ts`). Not yet tagged. |
 
 The app runs today via `docker compose up -d --build` on `http://localhost:3000` (see `RUNNING.md`). Backend tests live in `app/backend/test/` mirroring `src/`.
 
@@ -30,7 +31,6 @@ The app runs today via `docker compose up -d --build` on `http://localhost:3000`
 
 | Area | Where it's specified | Blocking? |
 |---|---|---|
-| Pause / leave days | `phases/phase-7-schedule-pause.md` | **next up** |
 | Signup gating (invite code / domain allowlist) | `phases/phase-4-security.md` § 4A.2 | **before any public host** |
 | Account lifecycle: email verify, password reset, idle timeout, deletion, export | `phases/phase-4-security.md` § 4B | before inviting >3 people |
 | TLS deploy: `docker-compose.prod.yml`, `Caddyfile`, `DEPLOY.md`, backups | `phases/phase-5-deploy-ops.md` | before leaving the LAN |
@@ -40,8 +40,7 @@ The app runs today via `docker compose up -d --build` on `http://localhost:3000`
 
 The goal is **all the code finished and verified locally in Docker**, with no VPS yet. That is achievable for everything except the parts that need a real host.
 
-1. **Phase 7** — pause / leave days. Small, and it depends on 6's sweep existing (it now does).
-2. **Phase 4A.2** — signup gating. Must land before anything is publicly reachable; also trivially testable.
+1. **Phase 4A.2** — signup gating. Must land before anything is publicly reachable; also trivially testable.
 3. **Phase 4B** — account lifecycle. Email flows work in dev without a provider: `lib/mailer.ts` logs the email instead of sending when `RESEND_API_KEY` is unset. Wants the test harness underneath it (now built), since it rewrites auth.
 4. **Phase 5 artifacts** — `docker-compose.prod.yml`, `Caddyfile`, `DEPLOY.md`, the backup script. **Write and verify these locally**: Caddy's `tls internal` issues a self-signed cert, so the full TLS path, the "backend port not published" property, and the `pg_dump`/restore cycle can all be proven on your own machine. What genuinely needs the VPS is only §5.2 (host hardening) and the live-TLS gate item — mark those `[manual]` and leave them.
 

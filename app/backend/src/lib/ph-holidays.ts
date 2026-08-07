@@ -36,6 +36,21 @@ export function manilaDateString(date: Date): string {
   }).format(date);
 }
 
+/**
+ * True when `date` (a Manila calendar day) falls inside the inclusive pause
+ * window. Both columns are set and cleared together; one without the other is
+ * invalid input, treated here as "not paused". YYYY-MM-DD strings compare
+ * correctly with <= / >= — no Date arithmetic, no timezone traps.
+ */
+export function isPausedOn(
+  row: { pausedFrom: string | null; pausedUntil: string | null },
+  date: Date = new Date(),
+): boolean {
+  if (!row.pausedFrom || !row.pausedUntil) return false;
+  const today = manilaDateString(date);
+  return today >= row.pausedFrom && today <= row.pausedUntil;
+}
+
 export function isYearCovered(_date: Date = new Date()): boolean {
   return true;
 }

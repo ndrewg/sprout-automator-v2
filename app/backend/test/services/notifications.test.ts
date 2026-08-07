@@ -456,6 +456,8 @@ function makeSweepDeps(overrides: Partial<SweepDeps> = {}): {
           clockInTime: "05:30:00",
           clockOutTime: "18:05:00",
           enabled: true,
+          pausedFrom: null,
+          pausedUntil: null,
           updatedAt: new Date(),
         },
       ];
