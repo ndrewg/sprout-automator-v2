@@ -2,7 +2,7 @@
 
 Read this first, before any phase file. The phase docs describe a *plan*; this describes the *reality*. When they disagree, this file wins and the phase file needs a correction note.
 
-Last updated: **2026-08-07**. Phase 6 complete and committed (`a81c96d`); all `[manual]` checks passed against live Telegram and live HRHub except the success ✅ notification, which is deferred because it cannot be produced without a real clock action. Not yet tagged.
+Last updated: **2026-08-07**. Phases T, 6 and 7 all built, reviewed and committed in one session (`ccc6f30`, `a81c96d`, `e6c81f9`). Every `[manual]` check for 6 and 7 passed against live Telegram and live HRHub, except the phase-6 success ✅ notification, which is deferred because it cannot be produced without a real clock action. Phase 6 is tagged; T and 7 are not.
 
 ---
 
@@ -23,7 +23,7 @@ Last updated: **2026-08-07**. Phase 6 complete and committed (`a81c96d`); all `[
 | Helmet CSP + HSTS, rate limits, trust proxy, body cap | ✅ | commit `21a0971` — **4A only, not tagged** |
 | Test harness: `app.ts`/`index.ts` split, vitest unit+integration projects, 23 integration tests, Playwright e2e | ✅ | phase T — `[manual]` Docker check passed; not yet tagged |
 | Run notifications + missed-run reconciliation | ✅ | commit `a81c96d`; six review rounds (defects 3, 12, 17, 18, 19, 20). `[manual]`: settings round-trip, test button, rate limit, enable guard, encrypted-at-rest, failure ⚠️, skipped ℹ️, missed 🔴 (incl. no-duplicate) all verified live — see `reviews/phase-6-addendum.md` § E. Success ✅ deferred (needs a real clock action). **Not yet tagged** |
-| Pause / leave days (schedule pause window + controls) | ✅ | gates 7A + 7B green; manual checks: pause banner appears, skip tomorrow works, clear restores normal. See `reviews/phase-7-addendum.md`. **[manual] gate:** apply the `0002_pause.sql` migration to the dev DB before testing (`pnpm exec tsx --env-file=../../.env src/db/migrate.ts`). Not yet tagged. |
+| Pause / leave days (schedule pause window + controls) | ✅ | commit `e6c81f9`; gates 7A + 7B green (66 unit, 48 integration, e2e desktop + mobile). **All seven `[manual]` checks passed live** — banner, "Skip tomorrow", **a paused day suppressed a real cron fire**, **no missed-run alert while paused and the alert returned once unpaused**, manual runs still work while paused, clearing restores normal, and a past window auto-expired with no user action. Migration `0002_pause.sql` applied to the dev DB and `pnpm dev` verified booting. See `reviews/phase-7-addendum.md`. **Not yet tagged** |
 
 The app runs today via `docker compose up -d --build` on `http://localhost:3000` (see `RUNNING.md`). Backend tests live in `app/backend/test/` mirroring `src/`.
 
@@ -41,8 +41,8 @@ The app runs today via `docker compose up -d --build` on `http://localhost:3000`
 The goal is **all the code finished and verified locally in Docker**, with no VPS yet. That is achievable for everything except the parts that need a real host.
 
 1. **Phase 4A.2** — signup gating. Must land before anything is publicly reachable; also trivially testable.
-3. **Phase 4B** — account lifecycle. Email flows work in dev without a provider: `lib/mailer.ts` logs the email instead of sending when `RESEND_API_KEY` is unset. Wants the test harness underneath it (now built), since it rewrites auth.
-4. **Phase 5 artifacts** — `docker-compose.prod.yml`, `Caddyfile`, `DEPLOY.md`, the backup script. **Write and verify these locally**: Caddy's `tls internal` issues a self-signed cert, so the full TLS path, the "backend port not published" property, and the `pg_dump`/restore cycle can all be proven on your own machine. What genuinely needs the VPS is only §5.2 (host hardening) and the live-TLS gate item — mark those `[manual]` and leave them.
+2. **Phase 4B** — account lifecycle. Email flows work in dev without a provider: `lib/mailer.ts` logs the email instead of sending when `RESEND_API_KEY` is unset. Wants the test harness underneath it (now built), since it rewrites auth.
+3. **Phase 5 artifacts** — `docker-compose.prod.yml`, `Caddyfile`, `DEPLOY.md`, the backup script. **Write and verify these locally**: Caddy's `tls internal` issues a self-signed cert, so the full TLS path, the "backend port not published" property, and the `pg_dump`/restore cycle can all be proven on your own machine. What genuinely needs the VPS is only §5.2 (host hardening) and the live-TLS gate item — mark those `[manual]` and leave them.
 
 Working prompts for each round are in [`SESSION-PROMPT.md`](./SESSION-PROMPT.md).
 
