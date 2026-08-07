@@ -32,6 +32,13 @@ export function useLogout() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => api.logout(),
-    onSuccess: () => qc.clear(),
+    onSuccess: () => {
+      // resetQueries() notifies subscribers AND resets the query data (refetching
+      // active queries). clear() alone empties the cache but never notifies the
+      // ["me"] observer in AuthGate, so it keeps its stale user and the Dashboard
+      // never unmounts. /auth/me now refetches, 401s, and AuthGate flips to the
+      // login page.
+      qc.resetQueries();
+    },
   });
 }

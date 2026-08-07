@@ -203,5 +203,8 @@ export function submitRunOtp(runId: string, code: string): boolean {
   return submitOtp(runId, code);
 }
 
-// Register the executor with the queue at module load (side-effect import).
-runQueue.setExecutor(executeQueuedRun);
+// NOTE: the run executor is registered with the queue in src/index.ts's
+// start() — the startup path — NOT at module load. Registering here would mean
+// importing the Express app (via routes/runs.ts) gives a route test a queue
+// executor that could launch Chromium. Keep the registration in the startup
+// path only (phase T1).

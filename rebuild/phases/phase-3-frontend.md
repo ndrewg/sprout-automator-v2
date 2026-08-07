@@ -54,7 +54,8 @@ Lean on the CLIs — they emit React-19/Tailwind-v4-correct code so the model do
 4. Hooks in `src/hooks/` (one concern each):
    - `useMe` → `useQuery(["me"], api.me → user)` with **`retry: false`** (a 401 must not retry-storm).
    - `useLogin` / `useSignup` → `useMutation`; `onSuccess` writes the returned user into the `["me"]` cache (`qc.setQueryData`) so the gate flips without a refetch.
-   - `useLogout` → `useMutation(api.logout)`; `onSuccess` → `qc.clear()`.
+   - `useLogout` → `useMutation(api.logout)`; `onSuccess` → **`qc.resetQueries()`** (see the as-built note below — **not** `qc.clear()`).
+   > ⚠️ **As-built (found 2026-08, phase T):** this line originally specified `qc.clear()`, and that was a **real bug**. `clear()` empties the cache but does not notify subscribers, so the `["me"]` observer in `AuthGate` kept its stale user and the Dashboard never unmounted after logout. `resetQueries()` notifies observers and refetches, so `/auth/me` 401s and `AuthGate` flips back to the login page. Caught by the phase-T e2e smoke flow on its first run — the fix is in `app/frontend/src/hooks/useAuth.ts`.
    - `useCredentials` → `useQuery(["credentials"])`; `useUpdateCredentials` → mutation, `onSuccess` invalidates `["credentials"]`; `useTestImap` → mutation (`api.testImap`), no invalidation.
    - `useSchedule` → `useQuery(["schedule"])`; `useUpdateSchedule` → mutation, invalidates `["schedule"]`.
    - `useRuns` → `useQuery(["runs"])` with **adaptive `refetchInterval`**: 1500 ms if any run is `pending`/`running`, else 5000 ms; `useStartRun` + `useSubmitOtp` → mutations invalidating `["runs"]`.

@@ -1,116 +1,16 @@
-import { randomUUID } from "node:crypto";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import express, {
-  type Request,
-  type Response,
-  type NextFunction,
-} from "express";
-import { pinoHttp } from "pino-http";
-import cookieParser from "cookie-parser";
-import { sql } from "drizzle-orm";
 import { config } from "./config";
 import { logger } from "./lib/logger";
-import { db } from "./db/client";
-import { attachUser } from "./middleware/auth";
-import { securityHeaders, authLimiter, apiLimiter } from "./middleware/security";
-import { authRouter } from "./routes/auth";
-import { credentialsRouter } from "./routes/credentials";
-import { runsRouter } from "./routes/runs";
-import { scheduleRouter } from "./routes/schedule";
-import { recoverOrphanedRuns } from "./services/run-queue";
+import { app } from "./app";
+import { recoverOrphanedRuns, runQueue } from "./services/run-queue";
+import { executeQueuedRun } from "./services/runs";
 import { loadAllSchedules } from "./services/scheduler";
 
-const app = express();
-
-// Behind a reverse proxy in production (Caddy, Phase 5).
-app.set("trust proxy", 1);
-
-// Strict security headers (CSP, HSTS, X-Frame-Options, …) on every response.
-app.use(securityHeaders);
-
-// Request logging with a per-request id. Secrets are redacted by the logger's
-// `redact` list (see lib/logger.ts).
-app.use(
-  pinoHttp({
-    logger,
-    genReqId: (req, res) => {
-      const existing = req.headers["x-request-id"];
-      const id =
-        (Array.isArray(existing) ? existing[0] : existing) ?? randomUUID();
-      res.setHeader("x-request-id", id);
-      return id;
-    },
-    // Don't log the high-frequency frontend polls (they drown out real
-    // activity like run progress). POST /runs, GET /runs/:id, etc. still log.
-    autoLogging: {
-      ignore: (req) => {
-        if (req.method !== "GET") return false;
-        const url = (req.url ?? "").split("?")[0];
-        return url === "/runs" || url === "/health";
-      },
-    },
-  }),
-);
-
-app.use(express.json({ limit: "100kb" }));
-app.use(cookieParser(config.SESSION_SECRET));
-app.use(attachUser);
-
-// Rate limits (before the routers). Auth endpoints are strict; the
-// authenticated API is generous. /health is intentionally left unthrottled.
-app.use("/auth/login", authLimiter);
-app.use("/auth/signup", authLimiter);
-app.use("/credentials", apiLimiter);
-app.use("/schedule", apiLimiter);
-app.use("/runs", apiLimiter);
-
-app.use("/auth", authRouter);
-app.use("/credentials", credentialsRouter);
-app.use("/runs", runsRouter);
-app.use("/schedule", scheduleRouter);
-
-app.get("/health", async (_req: Request, res: Response) => {
-  let dbStatus: "ok" | "down" = "down";
-  try {
-    await db.execute(sql`select 1`);
-    dbStatus = "ok";
-  } catch (err: unknown) {
-    logger.error({ err }, "health DB check failed");
-  }
-  res.json({
-    status: "ok",
-    service: "sprout-automator-backend",
-    version: "0.0.0",
-    db: dbStatus,
-    timestamp: new Date().toISOString(),
-  });
-});
-
-// Serve the built SPA (production). In dev this dir won't exist (Vite serves
-// the frontend); in the Docker image the frontend build stage lands here.
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const publicDir = path.resolve(__dirname, "../public");
-app.use(express.static(publicDir));
-
-// SPA catch-all: any GET NOT under an API prefix serves index.html so client
-// routing works while the API stays reachable. Regex negative-lookahead
-// (Express 5 routing — not a "*" string).
-app.get(
-  /^\/(?!auth|credentials|schedule|runs|health)(?:.*)$/,
-  (_req: Request, res: Response) => {
-    res.sendFile(path.join(publicDir, "index.html"));
-  },
-);
-
-// Global error handler (backstop). Logs the error, responds with a generic
-// JSON 500, and never leaks a stack trace to the client.
-app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
-  req.log.error({ err }, "unhandled error");
-  res.status(500).json({ error: "Internal server error" });
-});
-
 async function start(): Promise<void> {
+  // Register the run executor with the queue. This lives in the startup path,
+  // NOT in app.ts: importing the app for a route test must not register an
+  // executor that could launch Chromium.
+  runQueue.setExecutor(executeQueuedRun);
+
   // Any run left pending/running by a previous shutdown is orphaned — flip it
   // to failure so the user (and the single-active-run guard) aren't stuck.
   const recovered = await recoverOrphanedRuns();
