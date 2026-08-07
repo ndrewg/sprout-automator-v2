@@ -49,13 +49,25 @@ Small, listed there, still open:
 - `04`'s repo layout lists a `DEPLOY.md` that doesn't exist — Phase 5 will create it.
 - `phase-5-deploy-ops.md` § 5.3 says the frontend build stage is `node:22-alpine`; the actual Dockerfile and doc `04` both say `node:22-bookworm-slim` (Debian, for Tailwind v4's native engine). The Alpine mention is stale and would break the build if followed.
 
-## 8. `_archive/` still contains live secrets
+## 8. Onboarding material + the Gmail-only constraint in the fine print
+
+**Without it:** a colleague gets halfway through setup, discovers the OTP reader only speaks to Gmail, and stops.
+
+`lib/imap-otp.ts` hardcodes `imap.gmail.com:993`. That covers Gmail **and Google Workspace domains** (same host, App Passwords work identically) but **not** Microsoft 365 or anything else. Anyone whose HRHub one-time codes land in a non-Google mailbox needs a forwarding rule into a Gmail account before this tool can work for them at all.
+
+Two places this needs to appear, and the order matters:
+1. **In the app, next to the field** — extend the existing Gmail App Password walkthrough in `CredentialsPanel` with a line stating the mailbox must be Gmail or Google Workspace, and how to forward from another provider. This is what people actually read while setting up; an external document is not.
+2. **An onboarding doc** (deck or one-pager) for the "what is this and why would I use it" conversation — what the tool does, what it stores and how it's encrypted, the ~5-minute setup, what the notifications mean, and that it clocks *you* in under *your* credentials so accuracy is still your responsibility.
+
+Also worth stating plainly in both: a missed-run alert means "the automation didn't run", not "you aren't clocked in" — someone who clocked in manually will still get one.
+
+## 9. `_archive/` still contains live secrets
 
 Not a feature — a liability. It holds a real `.env` and session cookies; `reference/supply-chain-and-ci.md` cites it as the near-miss that motivated the gitleaks hook. It is gitignored, so this is about what sits in the working tree and any backup of it, not about the repository.
 
 The rebuild is complete and validated against live HRHub. Nothing in `_archive/` is referenced by any phase, and the guardrails forbid reading it. **Delete it** (and rotate anything it contains that is still valid). Left alone it will eventually be copied to a laptop, a backup, or a shared drive by someone who doesn't know what's in it.
 
-## 9. Missed-run notice can still be lost on the very first send
+## 10. Missed-run notice can still be lost on the very first send
 
 **Without it:** the reconciliation sweep inserts the `missed_run_notices` row **before** dispatching (D6 — the DB decides who sends). If every retry of that send fails (a long Telegram outage), the row exists but the user was never told, and no later sweep will retry it — the notice is permanently silent. The defect-17/18 transport retry makes a lost send rare but not impossible, and the missed alert is the one where silence is worst (the whole point of the feature).
 
