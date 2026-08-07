@@ -15,6 +15,7 @@ export default defineConfig({
       "/credentials": "http://localhost:3000",
       "/schedule": "http://localhost:3000",
       "/runs": "http://localhost:3000",
+      "/notifications": "http://localhost:3000",
       "/health": "http://localhost:3000",
     },
   },

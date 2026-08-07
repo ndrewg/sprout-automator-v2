@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "../../src/db/client";
-import { credentials, runs, schedules } from "../../src/db/schema";
+import { credentials, notificationSettings, runs, schedules } from "../../src/db/schema";
 import {
   closeTestServer,
   createUser,
@@ -47,6 +47,15 @@ describe("tenant isolation", () => {
       cookie: b.cookie,
       method: "PUT",
       body: { clockInTime: "06:00", clockOutTime: "17:00", enabled: true },
+    });
+    await request("/notifications", {
+      cookie: b.cookie,
+      method: "PUT",
+      body: {
+        telegramBotToken: "223456789:BCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi", // gitleaks:allow
+        telegramChatId: "999999999",
+        enabled: true,
+      },
     });
     const run = await request("/runs", {
       cookie: b.cookie,
@@ -174,7 +183,7 @@ describe("tenant isolation", () => {
 
   it("A's credential/schedule writes never create rows for B", async () => {
     const a = await createUser({ email: "tenant-a@example.com" });
-    await seedB();
+    const b = await seedB();
     await request("/credentials", {
       cookie: a.cookie,
       method: "PUT",
@@ -199,5 +208,35 @@ describe("tenant isolation", () => {
     const scheduleRows = await db.select().from(schedules);
     expect(scheduleRows.filter((s) => s.userId === aId.user.id)).toHaveLength(1);
     expect(scheduleRows.filter((s) => s.userId !== aId.user.id)).toHaveLength(1);
+
+    // Notification settings follow the same isolation: A's GET shows A's own
+    // defaults (never B's), and A's writes never touch B's row.
+    const aGet = await request("/notifications", { cookie: a.cookie });
+    expect(aGet.status).toBe(200);
+    const aView = (aGet.body as { settings: Record<string, unknown> }).settings;
+    expect(aView["configured"]).toBe(false);
+    expect(aView["telegramTokenSet"]).toBe(false);
+    expect(aView["telegramChatId"]).toBeNull();
+
+    const aPut = await request("/notifications", {
+      cookie: a.cookie,
+      method: "PUT",
+      body: {
+        telegramBotToken: "323456789:CDEFGHIJKLMNOPQRSTUVWXYZabcdefghi", // gitleaks:allow
+        telegramChatId: "777777777",
+        enabled: false,
+      },
+    });
+    expect(aPut.status).toBe(200);
+
+    const bView = (await request("/notifications", { cookie: b.cookie })).body as {
+      settings: { telegramChatId: string | null; enabled: boolean };
+    };
+    expect(bView.settings.telegramChatId).toBe("999999999");
+    expect(bView.settings.enabled).toBe(true);
+
+    const notifRows = await db.select().from(notificationSettings);
+    expect(notifRows.filter((n) => n.userId === aId.user.id)).toHaveLength(1);
+    expect(notifRows.filter((n) => n.userId !== aId.user.id)).toHaveLength(1);
   });
 });

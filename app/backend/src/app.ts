@@ -18,6 +18,7 @@ import { authRouter } from "./routes/auth";
 import { credentialsRouter } from "./routes/credentials";
 import { runsRouter } from "./routes/runs";
 import { scheduleRouter } from "./routes/schedule";
+import { notificationsRouter } from "./routes/notifications";
 
 // Everything that builds the Express app: middleware order, routers, /health,
 // the static SPA, the SPA catch-all, and the global error handler. Split out of
@@ -68,11 +69,13 @@ app.use("/auth/signup", authLimiter);
 app.use("/credentials", apiLimiter);
 app.use("/schedule", apiLimiter);
 app.use("/runs", apiLimiter);
+app.use("/notifications", apiLimiter);
 
 app.use("/auth", authRouter);
 app.use("/credentials", credentialsRouter);
 app.use("/runs", runsRouter);
 app.use("/schedule", scheduleRouter);
+app.use("/notifications", notificationsRouter);
 
 app.get("/health", async (_req: Request, res: Response) => {
   let dbStatus: "ok" | "down" = "down";
@@ -101,7 +104,7 @@ app.use(express.static(publicDir));
 // routing works while the API stays reachable. Regex negative-lookahead
 // (Express 5 routing — not a "*" string).
 app.get(
-  /^\/(?!auth|credentials|schedule|runs|health)(?:.*)$/,
+  /^\/(?!auth|credentials|schedule|runs|health|notifications)(?:.*)$/,
   (_req: Request, res: Response) => {
     res.sendFile(path.join(publicDir, "index.html"));
   },

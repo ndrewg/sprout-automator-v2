@@ -15,9 +15,12 @@ export type ClockActionResult = {
 };
 
 /**
- * Returns true when today already has a row for the action we're about to
- * perform (skip). Fail-safe: any unexpected condition returns TRUE — better to
- * miss one auto-clock than to accidentally double-clock.
+ * Returns whether today already has a row for the action we're about to
+ * perform (skip), with the reason. Fail-safe: any unexpected condition returns
+ * skipped: true — better to miss one auto-clock than to accidentally
+ * double-clock. `reason` is the message already logged to the run's steps, so
+ * the notifier can distinguish "matched row" (benign) from "could not verify"
+ * (the user is probably NOT clocked in).
  */
 export async function isAlreadyClockedForToday(
   page: Page,
@@ -25,7 +28,7 @@ export async function isAlreadyClockedForToday(
   userId: string,
   runId: string,
   log?: (message: string) => void,
-): Promise<boolean> {
+): Promise<{ skipped: boolean; reason: string }> {
   const label = action === "in" ? "IN" : "OUT";
   const actionRegex = new RegExp(`\\b${label}\\b`);
 
@@ -54,11 +57,10 @@ export async function isAlreadyClockedForToday(
     if (await attendanceSection.isVisible().catch(() => false)) {
       containerText = await attendanceSection.innerText();
     } else {
-      log?.(
-        `Could not locate Attendance card. Skipping ${label} as a safety measure.`,
-      );
+      const reason = `Could not locate Attendance card. Skipping ${label} as a safety measure.`;
+      log?.(reason);
       await screenshot(page, userId, runId, "already-clocked-check-no-card");
-      return true;
+      return { skipped: true, reason };
     }
 
     const lines = containerText
@@ -74,25 +76,22 @@ export async function isAlreadyClockedForToday(
     await screenshot(page, userId, runId, "already-clocked-check");
 
     if (matchedLine) {
-      log?.(
-        `Already clocked ${label} today (matched row "${matchedLine}") — skipping.`,
-      );
-      return true;
+      const reason = `Already clocked ${label} today (matched row "${matchedLine}") — skipping.`;
+      log?.(reason);
+      return { skipped: true, reason };
     }
 
-    log?.(
-      `No ${label} row found for ${todayCandidates[0]} — proceeding with clock action.`,
-    );
-    return false;
+    const reason = `No ${label} row found for ${todayCandidates[0]} — proceeding with clock action.`;
+    log?.(reason);
+    return { skipped: false, reason };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    log?.(
-      `Could not verify clock state (${msg}). Skipping ${label} as a safety measure.`,
-    );
+    const reason = `Could not verify clock state (${msg}). Skipping ${label} as a safety measure.`;
+    log?.(reason);
     await screenshot(page, userId, runId, "already-clocked-check-error").catch(
       () => {},
     );
-    return true;
+    return { skipped: true, reason };
   }
 }
 

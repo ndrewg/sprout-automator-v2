@@ -47,7 +47,9 @@ So the *only* producer of `skipped` is `isAlreadyClockedForToday()` returning `t
 
 Case 2 means **you are not clocked in**, and it is the earliest signal that HRHub changed its markup. Suppressing `skipped` hides exactly the case the user most needs to see.
 
-`clock.ts` already distinguishes them in its step messages. **Do not modify `clock.ts`** — it is the most brittle file in the repo. Instead the notifier reads the run's **last step message** and uses it as the reason line. Case 1 reads `Already clocked IN today (matched row …)`; case 2 reads `Could not locate Attendance card…` or `Could not verify clock state (…)`. Marker: a skip whose last step contains `safety measure` or `Could not` is rendered with ⚠️; anything else with ℹ️.
+`clock.ts` already distinguishes them in the reason strings it returns from `isAlreadyClockedForToday`. **Do not modify `clock.ts`** beyond that return value — it is the most brittle file in the repo. The already-clocked guard returns `{ skipped, reason }`, `runAutomation` surfaces the reason on `AutomationResult` as `skipReason`, and `finalizeRun` passes it to `notifyRunFinished`. Case 1 returns `Already clocked IN today (matched row …)`; case 2 returns `Could not locate Attendance card…` or `Could not verify clock state (…)`. Marker: a skip whose `skipReason` contains `safety measure` or `Could not` is rendered with ⚠️; anything else with ℹ️.
+
+> ⚠️ **As-built (found 2026-08-07):** an earlier draft of this section had the notifier read the run's **last step message** instead of a structural reason. That cannot work: `runAutomation`'s `finally` block always logs `"Closing browser context."` last, so `steps.at(-1)` can never be the skip reason — every skipped run notified the lifecycle line, and the ℹ️-vs-⚠️ distinction was dead. The structural fix landed in the same session: `isAlreadyClockedForToday` returns `{ skipped, reason }`, `runAutomation` exposes it as `skipReason`, and `finalizeRun` hands it to `notifyRunFinished` in place of `lastStep`. Do not reintroduce the last-step approach.
 
 ---
 
@@ -249,6 +251,8 @@ function classify(code: number | undefined, description: string | undefined): Te
 }
 ```
 
+> ⚠️ **As-built (found 2026-08-07, review defect 17 + 18):** the transport now **retries**. The verbatim block above is the single-attempt original; in the code, both `sendTelegramMessage` **and `getBotInfo`** share one retry loop (`withRetry`) of up to **3 attempts** with ~1s/~3s backoff. **`network`, `rate_limited`, and `unknown` are retried** (never `blocked` / `bad_token` — those are permanent and must reach the auto-disable path on the first try); `unknown` is the shape of a non-JSON 502/503 HTML page, i.e. transient. `retry_after` on 429 is honoured **up to a 60s cap** — beyond that it gives up rather than hold a pending timer. Per-attempt timeout is **15s** for both calls (getMe backs the Test-connection button, the most cold-start-exposed call). Why: the first outbound HTTPS call after a restart pays DNS + TLS handshake and a 10s timeout killed it, silently dropping the notification — worst at 05:30 after a quiet night, and worst of all for the missed-run alert, whose `missed_run_notices` row is inserted before sending. The retry lives inside the existing fire-and-forget boundary, so a run's status and timing are still unaffected. Log lines serialize **`errName`/`errMessage` only** — the old `{ err }` dumped a whole DOMException including its ~25 DOM constants.
+
 **Never log `botToken`.** It appears only in the URL passed to `fetch`; it must never reach a log line, an error message, an audit row, or an API response. The `redact` list in `lib/logger.ts` gains `telegramBotToken` and `botToken` as belt-and-braces.
 
 ### `src/services/notifications.ts` — policy
@@ -271,7 +275,7 @@ const AUTO_DISABLE_THRESHOLD = 3;
 
 > The distinction in steps 5–7 is the whole reason `dispatch` returns three states rather than a boolean. `"skipped"` must never reset the counter, or a user with notifications off would silently clear their own blocked history.
 
-**`notifyRunFinished({ run, status, error, lastStep })`:**
+**`notifyRunFinished({ run, status, error, skipReason })`:**
 
 Builds and dispatches the terminal-state message. Times are rendered in Manila via `Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Manila", hour: "2-digit", minute: "2-digit" })`. The date comes from `manilaDateString()` in `lib/ph-holidays` — do not reimplement it.
 
@@ -293,9 +297,9 @@ Could not locate Attendance card. Skipping IN as a safety measure.
 You may NOT be clocked in. Check HRHub.
 ```
 
-The last variant is the one that earns the feature. A skip is rendered as ⚠️ **and** carries the explicit "you may not be clocked in" line when the last step matches `/safety measure|Could not/`.
+The last variant is the one that earns the feature. A skip is rendered as ⚠️ **and** carries the explicit "you may not be clocked in" line when the `skipReason` matches `/safety measure|Could not/`.
 
-All run-derived text (`error`, `lastStep`) goes through `escapeHtml` first.
+All run-derived text (`error`, `skipReason`) goes through `escapeHtml` first, after ANSI escapes are stripped and long reasons are truncated to ~300 chars in the notification only (review defect 3). The full error stays in the run row for forensics.
 
 **Gate 6C:** unit tests (no network, no DB — inject a fake transport) covering: each of the four message shapes renders the right glyph and reason; the two skip variants are distinguished; `escapeHtml` neutralises `<b>` in an error string; `dispatch` returns `"skipped"` when disabled and does **not** reset `blockedCount`; three consecutive `"blocked"` results flip `enabled` to false and write exactly one audit row; a `"network"` error leaves `blockedCount` untouched.
 
@@ -310,11 +314,22 @@ All run-derived text (`error`, `lastStep`) goes through `escapeHtml` first.
 ```ts
 async function finalizeRun(
   run: Run,
-  patch: { status: "success" | "skipped" | "failure"; loginMethod?: string | null; error?: string | null },
+  patch: {
+    status: "success" | "skipped" | "failure";
+    loginMethod?: string | null;
+    error?: string | null;
+    skipReason?: string | null;
+  },
 ): Promise<void> {
+  // skipReason is for the notifier only — it is not a DB column. The error is
+  // stripped of ANSI escapes before it is persisted, so the RunsPanel, logs,
+  // and notification all see clean text (review defect 3).
+  const { skipReason, error: rawError, ...dbPatch } = patch;
+  const error =
+    rawError === undefined || rawError === null ? rawError : stripAnsi(rawError);
   const [updated] = await db
     .update(runs)
-    .set({ ...patch, finishedAt: new Date() })
+    .set({ ...dbPatch, error, finishedAt: new Date() })
     .where(eq(runs.id, run.id))
     .returning();
   if (!updated) throw new Error("finalizeRun: update returned no row");
@@ -325,12 +340,14 @@ async function finalizeRun(
   // is belt-and-braces so a future refactor can't make this crash a run.
   void notifyRunFinished({
     run: updated,
-    lastStep: updated.steps.at(-1)?.message ?? null,
+    skipReason: skipReason ?? null,
   }).catch(() => {});
 }
 ```
 
-`.returning()` matters: the notifier needs the **persisted** `steps` array to read the last step, and the in-memory `run` object was loaded before execution — its `steps` and `finishedAt` are stale.
+> ⚠️ **As-built (found 2026-08-07):** the skip reason is **`skipReason` threaded from `isAlreadyClockedForToday` through `runAutomation`**, **not** the run's last step — see the correction to "Why `skipped` matters". The draft below read `updated.steps.at(-1)?.message`; that can never be the reason because `runAutomation`'s `finally` always logs `"Closing browser context."` last.
+
+`.returning()` still matters: the notifier needs the **persisted** `run` row (its `error`, after ANSI stripping, and its `finishedAt`), and the in-memory `run` object was loaded before execution — its `finishedAt` is stale.
 
 Then replace each of the three update sites with a `finalizeRun(...)` call. The credentials-missing site becomes `finalizeRun(run, { status: "failure", error: "No Sprout credentials available for this run" })` — that one is worth notifying about precisely because the user won't otherwise discover their config is broken until payday.
 
@@ -369,9 +386,10 @@ The insert-then-send order is deliberate and mirrors D6: **the database decides 
 🔴 <b>Clock-in did not run</b>
 Expected 05:30 · Mon 10 Aug
 
-No run was recorded today. The scheduler may have been asleep or the
-server down. Clock in manually if you haven't already.
+No run was recorded today. The scheduler may have been asleep or the server down. Clock in manually if you haven't already.
 ```
+
+> ⚠️ **As-built (found 2026-08-07, review defect 20):** the closing instruction is **action-aware** — `Clock ${action === "in" ? "in" : "out"} manually…` — a clock-out miss says "Clock **out** manually", not the hardcoded "Clock in" shown in the block above (wrong on half of all missed alerts). The mid-sentence `\n` is also gone ("…asleep or the server down." on one line); the client wraps. The sweep's clock-out path is covered by an integration test (notice row records `action = 'out'`).
 
 **Gate 6E:**
 1. Unit: a schedule expecting 05:30 with `now` = 05:45 and no run → one notice row and one dispatch. Run the sweep again → still one notice row, no second dispatch.
@@ -439,6 +457,8 @@ const testLimiter = rateLimit({
 > The v1 spec called this option `keyFn`. **That is wrong for v7 — it is `keyGenerator`.** A wrong key name silently falls back to IP keying, which would rate-limit every user behind one NAT together.
 
 Flow: load settings → decrypt token → `getBotInfo()` to verify the token is real and belongs to a bot → send a test message naming the bot (`@username`) so the user can confirm they wired up the right one. Map `bad_token` / `blocked` to specific `400` messages; never echo a raw Telegram error.
+
+> ⚠️ **As-built (found 2026-08-07, review defect 19):** the test route passes **`{ maxAttempts: 2 }`** to both `getBotInfo()` and `sendTelegramMessage()`. An interactive request should fail fast — a human is watching the "Testing…" button and can just click again; the transport default of 3 (≈45s per call worst case) would hang the button for ~90s on a genuine failure. Background dispatch in `services/notifications.ts` deliberately keeps the default of 3 — nobody is waiting there, and a lost notification is the failure the retry exists to prevent. The distinction lives at the call site, not in `lib/telegram.ts`.
 
 ### Frontend
 

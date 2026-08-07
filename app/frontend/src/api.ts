@@ -32,6 +32,18 @@ export type ScheduleView = {
   today: { date: string; holiday: string | null };
 };
 
+export type NotificationSettingsView = {
+  enabled: boolean;
+  telegramChatId: string | null;
+  telegramTokenSet: boolean;
+  notifyOnSuccess: boolean;
+  notifyOnFailure: boolean;
+  notifyOnSkipped: boolean;
+  notifyOnMissed: boolean;
+  configured: boolean;
+  blockedCount: number;
+};
+
 export const api = {
   me: () => request<{ user: User }>("/auth/me"),
   signup: (email: string, password: string) =>
@@ -67,6 +79,18 @@ export const api = {
     request<{ schedule: ScheduleView }>("/schedule", {
       method: "PUT",
       body: JSON.stringify(patch),
+    }),
+
+  getNotifications: () =>
+    request<{ settings: NotificationSettingsView }>("/notifications"),
+  putNotifications: (patch: Record<string, string | boolean | null>) =>
+    request<{ settings: NotificationSettingsView }>("/notifications", {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    }),
+  testNotification: () =>
+    request<{ ok: boolean; botUsername?: string }>("/notifications/test", {
+      method: "POST",
     }),
 
   startRun: (action: "in" | "out") =>

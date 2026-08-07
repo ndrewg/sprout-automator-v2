@@ -5,6 +5,7 @@ import { SchedulePanel } from "@/components/panels/SchedulePanel";
 import { CredentialsPanel } from "@/components/panels/CredentialsPanel";
 import { ManualRunPanel } from "@/components/panels/ManualRunPanel";
 import { RunsPanel } from "@/components/panels/RunsPanel";
+import { NotificationsPanel } from "@/components/panels/NotificationsPanel";
 
 export function Dashboard({ user }: { user: User }) {
   const logout = useLogout();
@@ -31,6 +32,7 @@ export function Dashboard({ user }: { user: User }) {
       </header>
       <main className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-6">
         <SchedulePanel />
+        <NotificationsPanel />
         <CredentialsPanel />
         <ManualRunPanel />
         <RunsPanel />

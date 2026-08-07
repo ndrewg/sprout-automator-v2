@@ -16,7 +16,9 @@ if (KEY.length !== 32) {
 
 export function encrypt(plaintext: string): string {
   const iv = randomBytes(IV_LEN);
-  const cipher = createCipheriv("aes-256-gcm", KEY, iv);
+  const cipher = createCipheriv("aes-256-gcm", KEY, iv, {
+    authTagLength: TAG_LEN,
+  });
   const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   const payload = Buffer.concat([Buffer.from([VERSION]), iv, tag, ct]);
@@ -35,7 +37,9 @@ export function decrypt(token: string): string {
   const iv = buf.subarray(1, 1 + IV_LEN);
   const tag = buf.subarray(1 + IV_LEN, 1 + IV_LEN + TAG_LEN);
   const ct = buf.subarray(1 + IV_LEN + TAG_LEN);
-  const decipher = createDecipheriv("aes-256-gcm", KEY, iv);
+  const decipher = createDecipheriv("aes-256-gcm", KEY, iv, {
+    authTagLength: TAG_LEN,
+  });
   decipher.setAuthTag(tag);
   const plaintext = Buffer.concat([decipher.update(ct), decipher.final()]);
   return plaintext.toString("utf8");

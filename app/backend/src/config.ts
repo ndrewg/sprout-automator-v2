@@ -12,6 +12,7 @@ const envSchema = z.object({
   DATA_DIR: z.string().default("./data"),
   SPROUT_URL: z.string().url().default("https://kmcsolutions.hrhub.ph/"),
   MAX_CONCURRENT_RUNS: z.coerce.number().int().min(1).max(20).default(3),
+  MISSED_RUN_GRACE_MINUTES: z.coerce.number().int().min(1).max(180).default(20),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;

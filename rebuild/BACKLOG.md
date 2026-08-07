@@ -30,7 +30,7 @@ Prune `screenshots/<userId>/<runId>/` older than ~14 days. Keep failures longer 
 
 **Without it:** the manual OTP fallback is unusable in the one scenario it was built for. At 05:30 you are asleep; if IMAP is slow the run waits five minutes and dies. The dashboard paste-in box only helps someone already awake and watching.
 
-Once Phase 6 exists, the channel is already there — a run waiting for OTP could ask, and a reply could satisfy the bridge. Needs either long-polling `getUpdates` or a webhook (a webhook means a public HTTPS endpoint, so realistically post-Phase-5), plus care that a code arriving from Telegram is bound to the right `runId`. Real work, real payoff.
+> **Unblocked (2026-08-07):** phase 6 landed the Telegram transport (`lib/telegram.ts`), the notification settings row, and the settings routes — the channel now exists. What remains is the interactive half: a run waiting for OTP could ask, and a reply could satisfy the bridge. Needs either long-polling `getUpdates` or a webhook (a webhook means a public HTTPS endpoint, so realistically post-Phase-5), plus care that a code arriving from Telegram is bound to the right `runId`. Real work, real payoff.
 
 ## 5. Session hardening leftovers
 
@@ -54,3 +54,9 @@ Small, listed there, still open:
 Not a feature — a liability. It holds a real `.env` and session cookies; `reference/supply-chain-and-ci.md` cites it as the near-miss that motivated the gitleaks hook. It is gitignored, so this is about what sits in the working tree and any backup of it, not about the repository.
 
 The rebuild is complete and validated against live HRHub. Nothing in `_archive/` is referenced by any phase, and the guardrails forbid reading it. **Delete it** (and rotate anything it contains that is still valid). Left alone it will eventually be copied to a laptop, a backup, or a shared drive by someone who doesn't know what's in it.
+
+## 9. Missed-run notice can still be lost on the very first send
+
+**Without it:** the reconciliation sweep inserts the `missed_run_notices` row **before** dispatching (D6 — the DB decides who sends). If every retry of that send fails (a long Telegram outage), the row exists but the user was never told, and no later sweep will retry it — the notice is permanently silent. The defect-17/18 transport retry makes a lost send rare but not impossible, and the missed alert is the one where silence is worst (the whole point of the feature).
+
+The real fix is a **`notified_at` column** on `missed_run_notices`: sweep dispatches, and a failed send leaves `notified_at` NULL so the next sweep retries it once without risking a duplicate (the unique index on `(user_id, manila_date, action)` already prevents double-notify for *successful* sends). Small schema change; the sweep's insert-then-send order stays.

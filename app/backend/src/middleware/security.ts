@@ -56,3 +56,17 @@ export const apiLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: "Too many requests. Please slow down." },
 });
+
+/**
+ * Per-user limit for POST /notifications/test: 1 / 10s. Keyed by the
+ * authenticated user id (NOT the IP) so users behind one NAT are not
+ * rate-limited together. v7 option is `keyGenerator`, not `keyFn`.
+ */
+export const notificationsTestLimiter = rateLimit({
+  windowMs: 10_000,
+  limit: 1,
+  keyGenerator: (req) => `notif-test:${req.user?.id ?? "anon"}`,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  message: { error: "Please wait a few seconds before testing again." },
+});

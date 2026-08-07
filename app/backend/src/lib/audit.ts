@@ -11,7 +11,9 @@ export type AuditEventType =
   | "password_changed"
   | "credentials_updated"
   | "credentials_deleted"
-  | "schedule_updated";
+  | "schedule_updated"
+  | "notification_settings_updated"
+  | "notification_auto_disabled";
 
 export type AuditContext = {
   userId?: string | null;

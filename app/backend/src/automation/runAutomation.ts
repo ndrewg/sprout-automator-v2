@@ -24,6 +24,8 @@ export type AutomationResult = {
   loginMethod: LoginMethod;
   message?: string;
   error?: string;
+  /** Why the run was skipped (from isAlreadyClockedForToday), for the notifier. */
+  skipReason?: string;
 };
 
 export type RunArgs = {
@@ -105,8 +107,20 @@ export async function runAutomation(args: RunArgs): Promise<AutomationResult> {
     await saveUserStorageState(context, userId);
 
     log?.("Checking if already clocked for today...");
-    if (await isAlreadyClockedForToday(page, action, userId, runId, log)) {
-      return { success: true, skipped: true, loginMethod };
+    const alreadyClocked = await isAlreadyClockedForToday(
+      page,
+      action,
+      userId,
+      runId,
+      log,
+    );
+    if (alreadyClocked.skipped) {
+      return {
+        success: true,
+        skipped: true,
+        loginMethod,
+        skipReason: alreadyClocked.reason,
+      };
     }
 
     log?.(`Executing clock ${action.toUpperCase()} action...`);

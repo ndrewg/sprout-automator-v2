@@ -12,6 +12,8 @@ import {
   waitForOtp,
 } from "../automation/otp-bridge";
 import { pollForOtp } from "../lib/imap-otp";
+import { stripAnsi } from "../lib/text";
+import { notifyRunFinished } from "./notifications";
 import type { ClockAction } from "../automation/clock";
 
 type StartRunResult =
@@ -61,6 +63,43 @@ export async function startRun(params: {
   }
 }
 
+/**
+ * The single terminal-state writer for a run: updates the DB, logs, and fires
+ * the notification. Every place a run reaches a terminal status must go
+ * through here so a notification is never silently skipped by a new code path.
+ */
+async function finalizeRun(
+  run: Run,
+  patch: {
+    status: "success" | "skipped" | "failure";
+    loginMethod?: string | null;
+    error?: string | null;
+    skipReason?: string | null;
+  },
+): Promise<void> {
+  // skipReason is for the notifier only — it is not a DB column. And the error
+  // is stripped of ANSI escapes before it is persisted, so the RunsPanel,
+  // logs, and notification all see clean text (defect 3).
+  const { skipReason, error: rawError, ...dbPatch } = patch;
+  const error =
+    rawError === undefined || rawError === null ? rawError : stripAnsi(rawError);
+  const [updated] = await db
+    .update(runs)
+    .set({ ...dbPatch, error, finishedAt: new Date() })
+    .where(eq(runs.id, run.id))
+    .returning();
+  if (!updated) throw new Error("finalizeRun: update returned no row");
+  logger.info({ runId: run.id, status: patch.status }, "run finished");
+
+  // Fire-and-forget (sanctioned idiom #2, §03). A notification must never
+  // change run status or timing. notifyRunFinished never throws; the .catch
+  // is belt-and-braces so a future refactor can't make this crash a run.
+  void notifyRunFinished({
+    run: updated,
+    skipReason: skipReason ?? null,
+  }).catch(() => {});
+}
+
 export async function executeQueuedRun(runId: string): Promise<void> {
   const [run] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
   if (!run) {
@@ -78,14 +117,12 @@ export async function executeQueuedRun(runId: string): Promise<void> {
   const username = cred ? decryptOptional(cred.sproutUsernameEnc) : null;
   const password = cred ? decryptOptional(cred.sproutPasswordEnc) : null;
   if (!username || !password) {
-    await db
-      .update(runs)
-      .set({
-        status: "failure",
-        error: "No Sprout credentials available for this run",
-        finishedAt: new Date(),
-      })
-      .where(eq(runs.id, runId));
+    // Worth notifying about precisely because the user won't otherwise
+    // discover their config is broken until payday.
+    await finalizeRun(run, {
+      status: "failure",
+      error: "No Sprout credentials available for this run",
+    });
     return;
   }
 
@@ -135,27 +172,17 @@ export async function executeQueuedRun(runId: string): Promise<void> {
         ? "skipped"
         : "success"
       : "failure";
-    await db
-      .update(runs)
-      .set({
-        status,
-        loginMethod: result.loginMethod,
-        error: result.error ?? null,
-        finishedAt: new Date(),
-      })
-      .where(eq(runs.id, runId));
-    logger.info(
-      { runId, status, loginMethod: result.loginMethod },
-      "run finished",
-    );
+    await finalizeRun(run, {
+      status,
+      loginMethod: result.loginMethod,
+      error: result.error ?? null,
+      skipReason: result.skipReason ?? null,
+    });
   } catch (err: unknown) {
     cancelWait(runId);
     const message = err instanceof Error ? err.message : String(err);
     logger.error({ runId, err }, "run execution failed");
-    await db
-      .update(runs)
-      .set({ status: "failure", error: message, finishedAt: new Date() })
-      .where(eq(runs.id, runId));
+    await finalizeRun(run, { status: "failure", error: message });
   }
 }
 

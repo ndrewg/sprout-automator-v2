@@ -3,7 +3,7 @@ import { logger } from "./lib/logger";
 import { app } from "./app";
 import { recoverOrphanedRuns, runQueue } from "./services/run-queue";
 import { executeQueuedRun } from "./services/runs";
-import { loadAllSchedules } from "./services/scheduler";
+import { loadAllSchedules, startMissedRunSweep } from "./services/scheduler";
 
 async function start(): Promise<void> {
   // Register the run executor with the queue. This lives in the startup path,
@@ -21,6 +21,10 @@ async function start(): Promise<void> {
   // Rehydrate enabled schedules from the DB into the in-process cron scheduler.
   const scheduleCount = await loadAllSchedules();
   logger.info({ scheduleCount }, "loaded schedules from database");
+
+  // One global sweep for ALL users — a missed run is invisible unless the
+  // process that survived to report it reconciles it.
+  startMissedRunSweep();
 
   app.listen(config.PORT, "0.0.0.0", () => {
     logger.info(

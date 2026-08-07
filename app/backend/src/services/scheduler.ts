@@ -5,6 +5,7 @@ import { schedules, type Schedule } from "../db/schema";
 import { logger } from "../lib/logger";
 import { isPhilippineHoliday } from "../lib/ph-holidays";
 import { startRun } from "./runs";
+import { sweepMissedRuns } from "./notifications";
 import type { ClockAction } from "../automation/clock";
 
 type UserTasks = { clockIn: ScheduledTask; clockOut: ScheduledTask };
@@ -74,6 +75,22 @@ export async function loadAllSchedules(): Promise<number> {
     registerSchedule(row);
   }
   return active.size;
+}
+
+/**
+ * The missed-run reconciliation sweep: ONE global task for all users, started
+ * at boot (from index.ts). A process that is down cannot report that it is
+ * down, so a sweep on a live process reconciles what should have happened
+ * against what did. sweepMissedRuns never throws across the cron boundary.
+ */
+export function startMissedRunSweep(): void {
+  cron.schedule("*/5 * * * *", () => void sweepMissedRuns(), {
+    timezone: "Asia/Manila",
+  });
+  logger.info(
+    { expression: "*/5 * * * *", timezone: "Asia/Manila" },
+    "missed-run sweep registered",
+  );
 }
 
 /**

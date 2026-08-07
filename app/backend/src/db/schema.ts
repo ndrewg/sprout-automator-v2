@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   index,
+  integer,
   jsonb,
   pgTable,
   text,
@@ -146,6 +147,49 @@ export const auditLog = pgTable(
   }),
 );
 
+// notification_settings — one row per user; how they want to be told what happened
+export const notificationSettings = pgTable("notification_settings", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid("user_id")
+    .notNull()
+    .unique()
+    .references(() => users.id, { onDelete: "cascade" }),
+  // Encrypted — format owned by lib/encryption.ts. NULL until configured.
+  telegramBotTokenEnc: text("telegram_bot_token_enc"),
+  // NOT encrypted: an identifier, not a secret. "123456789" or "-1001234567890".
+  telegramChatId: text("telegram_chat_id"),
+  enabled: boolean("enabled").notNull().default(false),
+  notifyOnSuccess: boolean("notify_on_success").notNull().default(true),
+  notifyOnFailure: boolean("notify_on_failure").notNull().default(true),
+  notifyOnSkipped: boolean("notify_on_skipped").notNull().default(true),
+  notifyOnMissed: boolean("notify_on_missed").notNull().default(true),
+  // Consecutive "chat not found / bot blocked" errors. Persisted so a restart
+  // doesn't reset progress toward auto-disable.
+  blockedCount: integer("blocked_count").notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// missed_run_notices — idempotency ledger for the reconciliation sweep.
+// One row per (user, Manila date, action) means "we already told them".
+export const missedRunNotices = pgTable(
+  "missed_run_notices",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // YYYY-MM-DD in Asia/Manila. Text, not date — it is a Manila calendar day,
+    // not an instant, and manilaDateString() already produces exactly this.
+    manilaDate: text("manila_date").notNull(),
+    action: text("action", { enum: ["in", "out"] }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    onceUnique: uniqueIndex("missed_notice_once")
+      .on(t.userId, t.manilaDate, t.action),
+  }),
+);
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Session = typeof sessions.$inferSelect;
@@ -153,3 +197,5 @@ export type Credential = typeof credentials.$inferSelect;
 export type Schedule = typeof schedules.$inferSelect;
 export type Run = typeof runs.$inferSelect;
 export type AuditLogEntry = typeof auditLog.$inferSelect;
+export type NotificationSettings = typeof notificationSettings.$inferSelect;
+export type MissedRunNotice = typeof missedRunNotices.$inferSelect;

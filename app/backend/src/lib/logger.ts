@@ -44,6 +44,8 @@ export const logger = pino({
     "code",
     "otp",
     "sid",
+    "telegramBotToken",
+    "botToken",
     "APP_ENCRYPTION_KEY",
     "SESSION_SECRET",
   ],
