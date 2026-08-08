@@ -47,6 +47,7 @@ async function start(): Promise<void> {
   });
 }
 
+// oxlint-disable-next-line promise/prefer-await-to-then -- sanctioned top-level idiom (#3): the process exit is the only handler.
 start().catch((err: unknown) => {
   logger.error({ err }, "failed to start server");
   process.exit(1);

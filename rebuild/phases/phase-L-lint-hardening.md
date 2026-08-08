@@ -23,7 +23,9 @@
 
 The trigger was a genuine bug that shipped in phase 3 and survived every gate until someone opened the browser console: `RunsPanel` returned a fragment shorthand from `.map()` with the `key` on the inner `<tr>`, so React fell back to index reconciliation on a list that refetches every 1.5 s and inserts new rows at the top.
 
-**Honest caveat, established by testing before writing this:** enabling oxlint's correctness category does *not* catch that specific bug — the file is linted (an injected `debugger` fires immediately) but the fragment-shorthand key case is missed even with `react/jsx-key` explicitly enabled. The standard rule only inspects `<>…</>` when `checkFragmentShorthand` is on, and that is off by default in ESLint too. **Do not assume this round would have caught it.** Part of the work is finding out what the available tooling *can* catch and being straight about the rest.
+> ⚠️ **As-built (2026-08-08): the caveat this section originally carried was WRONG — disregard it.** The draft claimed oxlint could not catch the fragment-shorthand key bug even with `react/jsx-key` enabled. That conclusion came from a test that set `"react/jsx-key": "error"` as a bare string, leaving `checkFragmentShorthand` at its default — i.e. the one option that governs this exact case was never actually passed. On the installed **oxlint 1.71.0** the option is supported, and with `["error", { "checkFragmentShorthand": true }]` the exact pre-fix `RunsPanel.tsx` is reported: `error react(jsx-key): Missing "key" prop for element in iterator`. **This round's trigger bug is caught.** Verified independently twice.
+
+The general lesson stands even though the specific claim did not: find out what the tooling *can* catch by probing it, and report what it misses rather than implying coverage.
 
 ---
 
@@ -73,3 +75,17 @@ All green, **zero warnings** from either `lint`.
 4. **The fragment-shorthand missing key**, using `git show f7d631d^:app/frontend/src/components/panels/RunsPanel.tsx` as the probe. **Report honestly whether it is caught.** If not, that is a finding for the Handoff report, not something to paper over.
 
 Report which faults were caught and which were not. A linter that runs everywhere and catches nothing is worse than none, because it looks like coverage.
+
+---
+
+> ⚠️ **As-built (2026-08-08) — complete.** All four fault probes were introduced, confirmed reported, and removed:
+> | Probe | Rule that caught it |
+> |---|---|
+> | Fragment-shorthand missing `key` (the trigger bug, from `f7d631d^`) | `react/jsx-key` + `checkFragmentShorthand: true` |
+> | Floating promise | `typescript/no-floating-promises` |
+> | `.then().catch()` control flow | `promise/prefer-await-to-then` |
+> | Conditional React hook | `react/rules-of-hooks` |
+>
+> **Two things the phase file did not anticipate.** The backend type-aware rules need the `oxlint-tsgolint` companion package plus `options.typeAware: true` — neither is optional, and without them `no-floating-promises` silently does nothing. And `promise/prefer-await-to-then` was added beyond the two named rules: it is the only rule covering the `.then().catch()` case, which was L2's whole point. Both were the right calls.
+>
+> Six real findings were fixed on the backend (unused imports and variables in three test files, a stale `@typescript-eslint` directive, plus scoped disables for the intentional control-character regex and the fire-and-forget executor). `pnpm exec oxlint --report-unused-disable-directives` is clean on both packages, so no disable is dead weight.

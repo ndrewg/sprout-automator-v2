@@ -11,7 +11,6 @@ import {
   resetDatabase,
   setupDatabase,
   startTestServer,
-  type TestServer,
 } from "./harness";
 
 // 4B.2 email verification. Signup mints a `verify` token (24 h) and emails the
@@ -63,7 +62,7 @@ async function postVerify(token: string) {
 describe("email verification (§4B.2)", () => {
   beforeAll(async () => {
     await setupDatabase();
-    const srv: TestServer = await startTestServer();
+    await startTestServer();
   });
   beforeEach(async () => {
     await resetDatabase();

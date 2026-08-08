@@ -10,6 +10,7 @@ jobs:
         with: { node-version: 22 }
       - run: corepack enable pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test          # vitest (the pure-fn tests)
       - run: pnpm audit --audit-level=high
@@ -22,4 +23,5 @@ jobs:
         with: { node-version: 22 }
       - run: corepack enable pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
       - run: pnpm build         # tsc -b && vite build → catches type errors

@@ -8,6 +8,7 @@ async function main(): Promise<void> {
   await pool.end();
 }
 
+// oxlint-disable-next-line promise/prefer-await-to-then -- sanctioned top-level idiom (#3): the process exit is the only handler.
 main().catch((err: unknown) => {
   console.error("[migrate] failed:", err);
   process.exit(1);

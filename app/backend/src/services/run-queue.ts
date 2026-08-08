@@ -24,7 +24,10 @@ class RunQueue {
       const job = this.waiting.shift();
       if (!job) break;
       this.active += 1;
-      this.executor(job.runId).finally(() => {
+      // Fire-and-forget: the run proceeds independently of the queue loop.
+      // `void` marks the intentionally-unawaited promise for no-floating-promises.
+      // oxlint-disable-next-line promise/prefer-await-to-then -- sanctioned fire-and-forget cleanup idiom (#2): the `.finally` bookkeeping must not block the queue.
+      void this.executor(job.runId).finally(() => {
         this.active -= 1;
         void this.drain();
       });

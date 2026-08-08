@@ -97,7 +97,7 @@ async function finalizeRun(
   void notifyRunFinished({
     run: updated,
     skipReason: skipReason ?? null,
-  }).catch(() => {});
+  }).catch(() => {}); // oxlint-disable-line promise/prefer-await-to-then -- sanctioned fire-and-forget idiom (#2), §03.
 }
 
 export async function executeQueuedRun(runId: string): Promise<void> {

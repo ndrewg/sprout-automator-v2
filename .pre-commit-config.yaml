@@ -3,3 +3,17 @@ repos:
     rev: v8.21.2
     hooks:
       - id: gitleaks
+  - repo: local
+    hooks:
+      - id: lint-backend
+        name: lint-backend
+        entry: pnpm --dir app/backend lint
+        language: system
+        pass_filenames: false
+        files: ^app/backend/
+      - id: lint-frontend
+        name: lint-frontend
+        entry: pnpm --dir app/frontend lint
+        language: system
+        pass_filenames: false
+        files: ^app/frontend/

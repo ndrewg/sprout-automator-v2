@@ -51,4 +51,5 @@ function Badge({
   )
 }
 
+// oxlint-disable-next-line react/only-export-components -- shadcn CLI generates the variants export for consumers.
 export { Badge, badgeVariants }

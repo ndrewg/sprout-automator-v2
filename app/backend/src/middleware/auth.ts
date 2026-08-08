@@ -6,7 +6,6 @@ import { findValidSession } from "../lib/sessions";
 import { readSessionCookie } from "../lib/cookies";
 
 declare global {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       user?: User;

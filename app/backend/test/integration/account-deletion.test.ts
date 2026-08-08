@@ -24,7 +24,6 @@ import {
   resetDatabase,
   setupDatabase,
   startTestServer,
-  type TestServer,
 } from "./harness";
 
 // 4B.5 account deletion. DELETE /auth/account re-confirms the password, refuses
@@ -52,7 +51,7 @@ async function deleteAccount(cookie: string, pw: string) {
 describe("account deletion (§4B.5)", () => {
   beforeAll(async () => {
     await setupDatabase();
-    const srv: TestServer = await startTestServer();
+    await startTestServer();
   });
   beforeEach(async () => {
     await resetDatabase();

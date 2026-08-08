@@ -4,6 +4,7 @@
 // ANSI SGR escape sequences (colour, dim/bold, reset): \x1b[2m, \x1b[22m, …
 // Playwright error strings carry these; they render as garbage glyphs in
 // user-facing output (Telegram, the RunsPanel timeline).
+// oxlint-disable-next-line eslint/no-control-regex -- intentional: matching the ESC control character is the module's whole purpose.
 const ANSI_SGR = /\x1b\[[0-9;]*m/g;
 
 export function stripAnsi(text: string): string {

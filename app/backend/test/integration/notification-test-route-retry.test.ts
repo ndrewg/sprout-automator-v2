@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { eq } from "drizzle-orm";
 import { db } from "../../src/db/client";
 import { notificationSettings } from "../../src/db/schema";
 import { encrypt } from "../../src/lib/encryption";
