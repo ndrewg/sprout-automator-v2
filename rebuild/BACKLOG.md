@@ -1,83 +1,73 @@
 # Backlog — ranked
 
-Everything known-missing that isn't already a phase file, ordered by *how likely it is to actually hurt you*, not by effort. Each entry says what breaks without it, so a future session can re-rank on evidence rather than vibes.
+Everything known-missing that isn't already a phase file, ordered by *when it will actually hurt you*, not by effort. Each entry says what breaks without it, so a future session can re-rank on evidence rather than vibes.
 
-Promoted to phases: **run notifications + missed-run reconciliation** → `phases/phase-6-notifications.md`; **pause / leave days** → `phases/phase-7-schedule-pause.md`; **signup gating** → `phases/phase-4-security.md` § 4A.2.
+**Re-ranked 2026-08-08**, after phases T, 6, 7, 4A.2, 4B, L and 5 all landed. Four former entries are now done — see "Closed" at the bottom.
 
 ---
 
-## 1. Retry on transient failure
+## 1. Delete `_archive/`
 
-**Without it:** a flaky portal at 05:30 costs you the whole day. The current position — "the next scheduled run is the de-facto retry" (`01-PROJECT-BRIEF.md`, scope boundaries) — is only true if you consider *tomorrow* an acceptable retry interval. For a clock-in, it isn't.
+**Ten seconds, and it is the only standing liability in the tree.** It holds a real `.env` and Sprout session cookies; `reference/supply-chain-and-ci.md` cites it as the near-miss that motivated the gitleaks hook. Gitignored, so this is about the working copy and any backup of it, not the repository.
 
-`navigateToPortal` already retries 3× on server errors, so this only concerns failures *past* navigation: login timeouts, OTP never arriving, the clock dialog not appearing. One retry at +10 minutes, hard cap of two attempts total, and only for runs that failed (never `skipped` — the fail-safe skip must stay terminal, or a verification failure turns into repeated clock attempts, which is precisely the double-clock the guard exists to prevent).
-
-Cheap after Phase 6, because a notification tells you when it finally gave up. Needs an `attempt` column on `runs` and care with the partial unique index — a retry must not collide with its own predecessor.
+The rebuild is complete and validated against live HRHub. Nothing in `_archive/` is referenced by any phase and the guardrails forbid reading it. **Delete it, and rotate anything inside that is still valid.** Left alone it eventually gets copied to a laptop, a backup, or a shared drive by someone who doesn't know what's in it.
 
 ## 2. Screenshot / data pruning
 
-**Without it:** the disk fills, quietly. Roughly 8 full-page PNGs per run × 2 runs/day × every user, retained forever. Flagged as "recommended" in `phase-5-deploy-ops.md` § 5.6 and never built. On a 4 GB VPS with a handful of colleagues this becomes an ops incident months in, at which point the screenshots you actually need for a live drift investigation are buried in thousands you don't.
+**Starts hurting the day this lives on a VPS, silently.** Roughly 8 full-page PNGs per run × 2 runs/day × every user, retained forever. Flagged as "recommended" in `phase-5-deploy-ops.md` § 5.6 and never built. On a 4 GB box with a handful of colleagues it becomes an ops incident months in — and by then the screenshots you need for a live drift investigation are buried under thousands you don't.
 
-Prune `screenshots/<userId>/<runId>/` older than ~14 days. Keep failures longer than successes if it's easy — those are the ones with forensic value. A nightly cron in the container or a host-level job; either is fine.
+Prune `screenshots/<userId>/<runId>/` older than ~14 days; keep failures longer than successes if it's cheap, since those carry the forensic value. A nightly job in the container or on the host; either is fine.
 
-## 3. IP-keyed auth limiter locks out a whole team behind one NAT
+## 3. `notified_at` on `missed_run_notices`
 
-**Without it:** every colleague on the same corporate network is one shared IP. `authLimiter` is 10 requests / 15 minutes keyed by IP, and since 4B it covers login, signup, forgot-password and reset as a single shared budget. A few people fumbling passwords the same morning exhaust it for everyone — the rest get "Too many attempts. Please try again later." on their very first try of the day, with no hint that a colleague is the cause. Pre-existing for login+signup; adding the two reset endpoints makes it likelier to bite.
+**Protects the feature that justified all of phase 6.** The sweep inserts the notice row **before** dispatching (D6 — the database decides who sends). If every retry of that send fails during a long Telegram outage, the row exists, the user was never told, and no later sweep retries it: the notice is permanently silent. Rare after the defect-17/18 transport retry, but the missed alert is precisely the one where silence is worst.
 
-Options, for a deliberate decision rather than a default (do not pick by implementation convenience):
-- **Raise the budget** (e.g. 10 → 30 / 15 min). Cheapest; a small team rarely needs the defence 10 provides.
-- **Key attempts by email** with a looser IP-keyed backstop (per-account 5/15 min, per-IP 30/15 min). Correct semantics — a brute-forcer targets one account, not the IP — but needs a per-email counter that also covers the "no such user" path (key on the *submitted* email, which login already lowercases).
-- **Give the reset endpoints their own limiter** so a reset flow can't consume the login budget and vice versa. Simplest behavioural fix; still leaves two humans sharing one budget within a single endpoint.
+Add a `notified_at` column: the sweep dispatches, and a failed send leaves it NULL so the next sweep retries once. The unique index on `(user_id, manila_date, action)` already prevents double-notify for successful sends, so the insert-then-send order stays.
 
-## 4. Admin visibility
+## 4. IP-keyed auth limiter locks out a whole team behind one NAT
 
-**Without it:** you find out a colleague's automation has been broken for a week when they tell you.
+**Bites the morning you onboard people.** Every colleague on the corporate network shares one IP. `authLimiter` is 10 requests / 15 min keyed by IP and, since 4B, covers login, signup, forgot-password and reset as a single shared budget. A few people fumbling passwords the same morning exhaust it for everyone — the rest get "Too many attempts" on their first try of the day with no hint that a colleague caused it.
 
-`users.is_admin` exists, is returned by `publicUser`, and gates nothing. `phase-4-security.md` § 4B.7 sketches this. Minimum useful version: an admin-only read endpoint listing each user's last run per action with status and timestamp. Not impersonation, not credential access — just "whose automation is failing". Rank rises sharply the moment you onboard anyone.
+Three options; **this needs a deliberate decision, not whichever is easiest to implement**:
+- **Raise the budget** (10 → 30 / 15 min). Cheapest. A small trusted team rarely needs the defence 10 provides, and `AUTH_RATE_LIMIT` already makes it a config change.
+- **Key by email with a looser IP backstop** (per-account 5/15 min, per-IP 30/15 min). Correct semantics — a brute-forcer targets an account, not an IP — but needs a per-email counter covering the "no such user" path too, keyed on the submitted (lowercased) address.
+- **Give the reset endpoints their own limiter.** Stops a reset flow consuming the login budget; still leaves two humans sharing one budget within an endpoint.
 
-## 5. OTP submission via Telegram reply
+## 5. Onboarding material + the Gmail-only constraint in the fine print
 
-**Without it:** the manual OTP fallback is unusable in the one scenario it was built for. At 05:30 you are asleep; if IMAP is slow the run waits five minutes and dies. The dashboard paste-in box only helps someone already awake and watching.
+**Before you invite anyone.** `lib/imap-otp.ts` hardcodes `imap.gmail.com:993` — fine for Gmail *and* Google Workspace domains (same host, App Passwords identical), useless for Microsoft 365 or anything else. Anyone whose HRHub codes land in a non-Google mailbox needs a forwarding rule into Gmail before the tool works for them at all.
 
-> **Unblocked (2026-08-07):** phase 6 landed the Telegram transport (`lib/telegram.ts`), the notification settings row, and the settings routes — the channel now exists. What remains is the interactive half: a run waiting for OTP could ask, and a reply could satisfy the bridge. Needs either long-polling `getUpdates` or a webhook (a webhook means a public HTTPS endpoint, so realistically post-Phase-5), plus care that a code arriving from Telegram is bound to the right `runId`. Real work, real payoff.
+Two places, and the order matters:
+1. **In the app, beside the field** — extend the Gmail App Password walkthrough in `CredentialsPanel` to say the mailbox must be Gmail or Google Workspace, and how to forward from another provider. This is what people read while setting up; a document is not.
+2. **An onboarding one-pager or deck** for the "what is this and why would I use it" conversation: what it does, what it stores and how it's encrypted, the ~5-minute setup, what the notifications mean, and that it clocks *you* in under *your* credentials so accuracy remains your responsibility.
 
-## 6. Session hardening leftovers
+State plainly in both: **a missed-run alert means "the automation didn't run", not "you aren't clocked in"** — someone who clocked in by hand still gets one. Without that sentence, people either panic or learn to ignore the alerts.
 
-Idle session timeout (`phase-4-security.md` § 4B.4) is a one-line comparison in `findValidSession` and limits the blast radius of a stolen cookie. The rest of 4B (email verification, password reset, account deletion, export) matters once real colleagues are on it — and password reset in particular, because right now a forgotten password is unrecoverable without database surgery.
+## 6. Retry on transient failure
 
-## 7. Adopted-but-unbuilt improvements from `02-DECISIONS-AND-ARCHITECTURE.md`
+**A flaky portal at 05:30 currently costs the whole day.** The standing position — "the next scheduled run is the de-facto retry" (`01-PROJECT-BRIEF.md`) — is only true if *tomorrow* counts as a retry interval. For a clock-in it doesn't.
 
-Small, listed there, still open:
-- **#5** — type the `useRuns` refetch callback instead of `(query: any)`. The one `any` in the data layer.
-- **#7** — explicit `QueryClient` defaults (`staleTime`, `retry: 1`, `retry: false` for `useMe`). Partly done; verify.
-- `credentials_deleted` as a distinct audit event — **done** (the union has it).
+`navigateToPortal` already retries 3× on server errors, so this covers failures *past* navigation: login timeouts, OTP never arriving, the clock dialog not appearing. One retry at +10 minutes, hard cap of two attempts, **only for `failure`** — never `skipped`, or a fail-safe verification skip turns into repeated clock attempts, which is exactly the double-clock the guard exists to prevent. Needs an `attempt` column on `runs` and care with the partial unique index so a retry can't collide with its own predecessor.
 
-## 8. Documentation drift
+## 7. Admin visibility
 
-- `04-STACK-SCAFFOLD-AND-CONFIG.md` still targets Vite 6 / TS 5.6; as-built is Vite 8 / TS 6 (corrected only in `phase-3-frontend.md`'s margin note).
-- `04`'s repo layout lists a `DEPLOY.md` that doesn't exist — Phase 5 will create it.
-- `phase-5-deploy-ops.md` § 5.3 says the frontend build stage is `node:22-alpine`; the actual Dockerfile and doc `04` both say `node:22-bookworm-slim` (Debian, for Tailwind v4's native engine). The Alpine mention is stale and would break the build if followed.
+**You currently learn a colleague's automation is broken when they tell you.** `users.is_admin` exists, is returned by `publicUser`, and gates nothing (`phase-4-security.md` § 4B.7 sketches it). Minimum useful version: an admin-only read endpoint listing each user's last run per action with status and timestamp. Not impersonation, not credential access — just "whose automation is failing". Rank rises sharply the moment anyone else is using this.
 
-## 9. Onboarding material + the Gmail-only constraint in the fine print
+## 8. OTP submission via Telegram reply
 
-**Without it:** a colleague gets halfway through setup, discovers the OTP reader only speaks to Gmail, and stops.
+**The manual OTP fallback is unusable in the one scenario it was built for.** At 05:30 you are asleep; if IMAP is slow the run waits five minutes and dies. The dashboard paste-in box only helps someone already awake and watching.
 
-`lib/imap-otp.ts` hardcodes `imap.gmail.com:993`. That covers Gmail **and Google Workspace domains** (same host, App Passwords work identically) but **not** Microsoft 365 or anything else. Anyone whose HRHub one-time codes land in a non-Google mailbox needs a forwarding rule into a Gmail account before this tool can work for them at all.
+Phase 6 landed the transport, the settings row and the routes, so the channel exists. What remains is the interactive half: a run waiting for OTP asks, and a reply satisfies the bridge. Needs long-polling `getUpdates` or a webhook (a webhook means a public HTTPS endpoint, so realistically after a real deploy), plus care that a code arriving from Telegram binds to the right `runId`. Biggest item here, and the most satisfying.
 
-Two places this needs to appear, and the order matters:
-1. **In the app, next to the field** — extend the existing Gmail App Password walkthrough in `CredentialsPanel` with a line stating the mailbox must be Gmail or Google Workspace, and how to forward from another provider. This is what people actually read while setting up; an external document is not.
-2. **An onboarding doc** (deck or one-pager) for the "what is this and why would I use it" conversation — what the tool does, what it stores and how it's encrypted, the ~5-minute setup, what the notifications mean, and that it clocks *you* in under *your* credentials so accuracy is still your responsibility.
+## 9. Documentation drift (residual)
 
-Also worth stating plainly in both: a missed-run alert means "the automation didn't run", not "you aren't clocked in" — someone who clocked in manually will still get one.
+`04-STACK-SCAFFOLD-AND-CONFIG.md` still names Vite 6 / TS 5.6 as targets; as-built is Vite 8 / TS 6. A note was added at the top of that file, but the dependency block below it still reads as though 6 were the target.
 
-## 10. `_archive/` still contains live secrets
+---
 
-Not a feature — a liability. It holds a real `.env` and session cookies; `reference/supply-chain-and-ci.md` cites it as the near-miss that motivated the gitleaks hook. It is gitignored, so this is about what sits in the working tree and any backup of it, not about the repository.
+## Closed
 
-The rebuild is complete and validated against live HRHub. Nothing in `_archive/` is referenced by any phase, and the guardrails forbid reading it. **Delete it** (and rotate anything it contains that is still valid). Left alone it will eventually be copied to a laptop, a backup, or a shared drive by someone who doesn't know what's in it.
-
-## 11. Missed-run notice can still be lost on the very first send
-
-**Without it:** the reconciliation sweep inserts the `missed_run_notices` row **before** dispatching (D6 — the DB decides who sends). If every retry of that send fails (a long Telegram outage), the row exists but the user was never told, and no later sweep will retry it — the notice is permanently silent. The defect-17/18 transport retry makes a lost send rare but not impossible, and the missed alert is the one where silence is worst (the whole point of the feature).
-
-The real fix is a **`notified_at` column** on `missed_run_notices`: sweep dispatches, and a failed send leaves `notified_at` NULL so the next sweep retries it once without risking a duplicate (the unique index on `(user_id, manila_date, action)` already prevents double-notify for *successful* sends). Small schema change; the sweep's insert-then-send order stays.
+- ~~Session hardening leftovers~~ — idle timeout, password reset, email verification and account deletion all shipped in 4B. Data export was deliberately skipped.
+- ~~Adopted-but-unbuilt improvements~~ — `useRuns`' refetch callback is typed (`Query<Run[]>`), the `QueryClient` has explicit defaults, and `credentials_deleted` is in the audit union.
+- ~~`DEPLOY.md` does not exist~~ — created in phase 5.
+- ~~`phase-5` § 5.3 says `node:22-alpine`~~ — corrected; the only remaining mention is the correction note itself.
