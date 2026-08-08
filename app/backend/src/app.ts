@@ -72,6 +72,10 @@ app.use("/auth/signup", authLimiter);
 // token. authLimiter is one instance, so all four mount points share a budget.
 app.use("/auth/forgot-password", authLimiter);
 app.use("/auth/reset-password", authLimiter);
+// 4B.2 — the verify path is the same family: GET/POST /auth/verify redeem an
+// unauthenticated token, and /auth/verify/resend sends email. One mount covers
+// all three via prefix matching, all sharing the authLimiter budget.
+app.use("/auth/verify", authLimiter);
 app.use("/credentials", apiLimiter);
 app.use("/schedule", apiLimiter);
 app.use("/runs", apiLimiter);

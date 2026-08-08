@@ -88,6 +88,11 @@ Three endpoints, all generic-messaged:
 ### 4B.4 — Idle session timeout (⚑ improvement #4)
 In `findValidSession`, in addition to the 30-day absolute expiry, treat a session as expired if `now - lastUsedAt > 7 days` (delete + return null). Keeps the absolute cap *and* adds idle expiry. One extra comparison.
 
+> ⚠️ **As-built (found 2026-08-08, 4B round 2):** two things diverge from this section.
+> **(1) A privilege escalation was found and closed.** `consumeResetToken` originally ignored the `purpose` column, so a **verify token could be redeemed at the reset endpoint to change a password** — and verify tokens are minted automatically at signup with a 24 h TTL, while reset tokens are deliberately requested with a 1 h TTL, so the weaker token opened the stronger door. `purpose` is now a required parameter, checked against the stored row, and tested in both directions (verify-at-reset and reset-at-verify), with neither token consumed on a failed attempt.
+> **(2) Verification is deliberately NOT enforced.** This section offers gating `PUT /credentials` / `PUT /schedule` / `POST /runs` on `email_verified_at` as "your call". For this build the answer is **no**: with no mail provider configured — the documented default — verification links only ever reach the server log, so gating would make the app unusable for every colleague. Verification is built and displayed; enforcement waits until a real provider is configured.
+> **Also:** § 4B.6 (data export) and § 4B.7 (monitoring hooks) were **deliberately skipped** — export is ceremony for a handful of users, and admin visibility is ranked in `BACKLOG.md` where it can be judged against everything else. 4B is functionally complete without them.
+
 ### 4B.5 — Account deletion
 `DELETE /auth/account` (auth required, re-enter password to confirm): inside a transaction, delete the user (cascades sessions/credentials/schedules/runs), and the `audit_log` rows keep `userId` as `null` (the FK is `SET NULL`) so the trail survives. Write a final `account_deleted` audit entry first. Also `unregisterSchedule(userId)` so the cron tasks stop. Confirm storage-state/screenshot dirs for that UUID are removed from `DATA_DIR`.
 

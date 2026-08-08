@@ -13,7 +13,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return body as T;
 }
 
-export type User = { id: string; email: string; isAdmin: boolean };
+export type User = {
+  id: string;
+  email: string;
+  isAdmin: boolean;
+  emailVerifiedAt: string | null;
+};
 
 export type CredentialsView = {
   sproutUsername: string | null;
@@ -70,6 +75,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ token, newPassword }),
     }),
+  verifyEmail: (token: string) =>
+    request<{ ok: true }>("/auth/verify", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
+  resendVerification: () =>
+    request<{ ok: true }>("/auth/verify/resend", { method: "POST" }),
 
   getCredentials: () => request<{ credentials: CredentialsView }>("/credentials"),
   putCredentials: (patch: Record<string, string | null>) =>

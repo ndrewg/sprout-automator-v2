@@ -16,7 +16,9 @@ export type AuditEventType =
   | "notification_settings_updated"
   | "notification_auto_disabled"
   | "password_reset_requested"
-  | "password_reset_completed";
+  | "password_reset_completed"
+  | "email_verified"
+  | "account_deleted";
 
 export type AuditContext = {
   userId?: string | null;

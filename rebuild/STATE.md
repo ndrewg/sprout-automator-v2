@@ -2,7 +2,7 @@
 
 Read this first, before any phase file. The phase docs describe a *plan*; this describes the *reality*. When they disagree, this file wins and the phase file needs a correction note.
 
-Last updated: **2026-08-07**. Phases T, 6, 7, 4A.2 and 4B.1/4B.3/4B.4 all built, reviewed and committed. Phase 4B split: mailer + password reset (round 1) done; email verification, account deletion, data export and monitoring (round 2) deferred. Every `[manual]` check passed. Phase 6 is tagged; T, 7 and 4B are not (4B incomplete until round 2).
+Last updated: **2026-08-08**. Phases T, 6, 7, 4A.2 and all of 4B built, reviewed and committed. 4B was split across two rounds: mailer + password reset + idle timeout (round 1), then email verification + account deletion (round 2). **4B.6 (data export) and 4B.7 (monitoring hooks) were deliberately skipped** — export is ceremony for a handful of users, and admin visibility is ranked in `BACKLOG.md` instead — so 4B is functionally complete. Every `[manual]` check passed. Phase 6 is tagged; T, 7 and 4 are not.
 
 ---
 
@@ -21,7 +21,8 @@ Last updated: **2026-08-07**. Phases T, 6, 7, 4A.2 and 4B.1/4B.3/4B.4 all built,
 | React 19 / Tailwind 4 / shadcn SPA, four panels, responsive | ✅ | tag `phase-3-complete` |
 | SPA served from Express in the production image | ✅ | tag `phase-3-complete` |
 | Helmet CSP + HSTS, rate limits, trust proxy, body cap | ✅ | commit `21a0971` — **4A only, not tagged** |
-| Transactional email mailer + password reset + idle session timeout | ✅ | **4B.1/4B.3/4B.4** — environment-dependent dev/prod logging, single-use tokens, resettable rate-limit store for tests, 11th-is-429 property asserted at default. All nine `[manual]` checks passed. **Not yet tagged** (round 2 remains) |
+| Email verification + account deletion | ✅ | **4B.2/4B.5** — round 2. Verify tokens reuse `reset_tokens` with `purpose`, 24 h TTL, single-use. **A privilege escalation was found and fixed here unprompted:** `consumeResetToken` ignored `purpose`, so a 24 h verify token could be spent at the 1 h reset endpoint to change a password; purpose is now required and tested both directions. Deletion re-confirms the password, refuses while a run is active, unregisters cron, writes a surviving `account_deleted` audit row (`user_id` NULL + `emailHash`), cascades eight tables and removes the user's data directories. **Verification is deliberately NOT enforced** — with no mail provider the links only reach the server log, so gating actions on it would make the app unusable. All nine `[manual]` checks passed. **Not yet tagged** |
+| Transactional email mailer + password reset + idle session timeout | ✅ | **4B.1/4B.3/4B.4** — environment-dependent dev/prod logging, single-use tokens, resettable rate-limit store for tests, 11th-is-429 property asserted at default. All nine `[manual]` checks passed. **Not yet tagged** |
 | Test harness: `app.ts`/`index.ts` split, vitest unit+integration projects, 23 integration tests, Playwright e2e | ✅ | phase T — `[manual]` Docker check passed; not yet tagged |
 | Run notifications + missed-run reconciliation | ✅ | commit `a81c96d`; six review rounds (defects 3, 12, 17, 18, 19, 20). `[manual]`: settings round-trip, test button, rate limit, enable guard, encrypted-at-rest, failure ⚠️, skipped ℹ️, missed 🔴 (incl. no-duplicate) all verified live — see `reviews/phase-6-addendum.md` § E. Success ✅ deferred (needs a real clock action). **Not yet tagged** |
 | Signup gating — email allowlist (§ 4A.2) | ✅ | `SIGNUP_ALLOWED` takes domains and exact addresses; optional in dev (allow-all + warning), **required in production or the app refuses to boot**. All six `[manual]` checks passed live, including the substring attack (`notorchard.com.au` → 403) and grandfathering (an address removed from the list could no longer sign up but still logged in). Rejections audit an `emailHash` only. See `reviews/phase-4A2-addendum.md`. **Not yet tagged** |
@@ -33,7 +34,6 @@ The app runs today via `docker compose up -d --build` on `http://localhost:3000`
 
 | Area | Where it's specified | Blocking? |
 |---|---|---|
-| Account lifecycle: email verification (4B.2), account deletion (4B.5), data export (4B.6), monitoring hooks (4B.7) | `phases/phase-4-security.md` § 4B | before inviting >3 people (4B.1/4B.3/4B.4 done in round 1) |
 | TLS deploy: `docker-compose.prod.yml`, `Caddyfile`, `DEPLOY.md`, backups | `phases/phase-5-deploy-ops.md` | before leaving the LAN |
 | Everything else | `BACKLOG.md` | ranked there |
 
@@ -41,8 +41,7 @@ The app runs today via `docker compose up -d --build` on `http://localhost:3000`
 
 The goal is **all the code finished and verified locally in Docker**, with no VPS yet. That is achievable for everything except the parts that need a real host.
 
-1. **Phase 4B** — account lifecycle. Email flows work in dev without a provider: `lib/mailer.ts` logs the email instead of sending when `RESEND_API_KEY` is unset. Wants the test harness underneath it (now built), since it rewrites auth.
-2. **Phase 5 artifacts** — `docker-compose.prod.yml`, `Caddyfile`, `DEPLOY.md`, the backup script. **Write and verify these locally**: Caddy's `tls internal` issues a self-signed cert, so the full TLS path, the "backend port not published" property, and the `pg_dump`/restore cycle can all be proven on your own machine. What genuinely needs the VPS is only §5.2 (host hardening) and the live-TLS gate item — mark those `[manual]` and leave them.
+1. **Phase 5 artifacts** — `docker-compose.prod.yml`, `Caddyfile`, `DEPLOY.md`, the backup script. **Write and verify these locally**: Caddy's `tls internal` issues a self-signed cert, so the full TLS path, the "backend port not published" property, and the `pg_dump`/restore cycle can all be proven on your own machine. What genuinely needs the VPS is only §5.2 (host hardening) and the live-TLS gate item — mark those `[manual]` and leave them.
 
 Working prompts for each round are in [`SESSION-PROMPT.md`](./SESSION-PROMPT.md).
 

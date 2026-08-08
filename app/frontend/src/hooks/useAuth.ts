@@ -8,6 +8,12 @@ export function useMe() {
     queryKey: ["me"],
     queryFn: async () => (await api.me()).user,
     retry: false, // a 401 must not retry-storm
+    // Re-checking the session on every tab-focus buys almost nothing — if it
+    // died, the next real action 401s and the UI reacts — and it actively hurts:
+    // while logged out this query has no data, so a refetch returns it to
+    // `pending`, AuthGate renders its loading branch, and AuthPage unmounts
+    // mid-typing. Found by alt-tabbing away from a half-filled login form.
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -53,5 +59,17 @@ export function useResetPassword() {
   return useMutation({
     mutationFn: ({ token, newPassword }: { token: string; newPassword: string }) =>
       api.resetPassword(token, newPassword),
+  });
+}
+
+export function useVerifyEmail() {
+  return useMutation({
+    mutationFn: (token: string) => api.verifyEmail(token),
+  });
+}
+
+export function useResendVerification() {
+  return useMutation({
+    mutationFn: () => api.resendVerification(),
   });
 }
