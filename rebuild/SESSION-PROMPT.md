@@ -1,38 +1,25 @@
 # Session prompts — copy these into opencode
 
-The workflow is a **two-session relay with you in the middle**:
+The loop is **three opencode sessions, relayed by you**:
 
 ```
-DeepSeek session         you              Haiku session
-─────────────────        ───              ─────────────
-codes the whole phase
-runs the gates
-emits Handoff report  ─── paste ──▶       reads the DIFF (not just the report)
-                                          re-runs the gates
-                                          reviews against AGENTS.md
-                                          updates STATE.md
-                                          commits the phase
-      ◀── paste findings if not clean ────
+implementer          you            tester              you           reviewer
+───────────          ───            ──────              ───           ────────
+codes the item                      re-runs gates                     reads the DIFF
+runs the gates                      probes the claims                 checks AGENTS.md
+Handoff report ─ paste ─▶           writes the addendum ─ paste ─▶    verifies findings closed
+                                    lists what YOU must              updates STATE.md
+                                    check by hand                    COMMITS
+      ◀──────── paste findings back if either finds a problem ────────
 ```
 
-One phase per round. The loop stops at each phase boundary so you can look before it moves on.
+**Why three roles.** The implementer cannot judge its own work — that is the whole reason for the split. The tester's job is to distrust the Handoff report and verify independently; the reviewer's is to read the diff against the rules and commit. Collapsing tester into reviewer is tempting and loses the most valuable thing: someone whose only job is to try to make the claims false.
 
-## The queue — work it in this order
-
-| # | Session target | Notes |
-|---|---|---|
-| 1 | `phases/phase-T-test-harness.md` | **First.** Nothing after this has working gates without it. |
-| 2 | `phases/phase-6-notifications.md` | Telegram + missed-run reconciliation |
-| 3 | `phases/phase-7-schedule-pause.md` | Small; depends on 6's sweep |
-| 4 | `phases/phase-4-security.md` § 4A.2 | Signup gating — before anything public |
-| 5 | `phases/phase-4-security.md` § 4B | Account lifecycle; wants the harness underneath it |
-| 6 | `phases/phase-5-deploy-ops.md` | Artifacts only; ~90% verifiable locally via Caddy `tls internal` |
-
-Update the **TARGET** line and paste. After each round: check the reviewer committed, then start the next.
+**What no model can do for you.** Over this build, review found the invisible defects — a privilege escalation, an unrated-limited endpoint — and *a human clicking* found eleven others: a dead help link, a reset page that rendered a dashboard, a form that cleared on alt-tab, a console warning nobody read. **Those needed a person using the app**, and they still do. Every prompt below ends by listing what you must check by hand. Do not skip that section because the gates are green; green gates are exactly the state all eleven were found in.
 
 ---
 
-## Prompt A — implementer (DeepSeek V4 Flash)
+## Prompt 1 — implementer (DeepSeek V4 Flash)
 
 > You are working on **Sprout Automator**, a self-hosted multi-tenant web app that clocks colleagues in and out of Sprout HRHub on a schedule. The project is thoroughly specified — read before you write.
 >
@@ -67,13 +54,44 @@ Update the **TARGET** line and paste. After each round: check the reviewer commi
 
 ---
 
-## Prompt B — reviewer (Haiku)
+## Prompt 2 — tester (DeepSeek V4 Flash, fresh session)
+
+Paste the implementer's Handoff report **below** this prompt. **Start a new session** — a tester that shares the implementer's context inherits its blind spots.
+
+> You are the **tester** for a change to **Sprout Automator**. Another model implemented it and produced the handoff report below. **Your job is to try to make its claims false**, not to confirm them.
+>
+> **Read first:** `rebuild/STATE.md`, `AGENTS.md`, `rebuild/reference/testing-strategy.md`, and the phase or backlog item the report names.
+>
+> **Do this, in order:**
+> 1. **Re-run every gate yourself.** Do not trust pasted output — run the commands and paste what you get.
+>    ```
+>    cd app/backend  && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration
+>    cd app/frontend && pnpm lint && pnpm build && pnpm test:e2e
+>    ```
+> 2. **Diff the report against reality.** `git status` and `git diff`. **A file changed but unreported is a finding.** So is a claim in the report with nothing in the diff behind it.
+> 3. **Probe every new test.** For each one the report claims proves something: break the thing it protects, confirm the test goes red, restore. A test that cannot fail is worse than no test, because it reads as coverage. Report which you verified this way and which you did not.
+> 4. **Attack the change.** Not "does it work" but "how would I break it": missing auth, a user id taken from the request instead of the session, a token redeemable for the wrong purpose, an unbounded retry, a secret in a log line or an audit row, an endpoint with no rate limit, an error message that reveals whether an account exists. Try them with `curl` where you can.
+> 5. **Check the database directly** where the change touches it — `docker compose exec postgres psql -U sprout -d sprout -c "…"`. Assertions in tests describe intent; the table shows what happened.
+>
+> **Then write `rebuild/reviews/<item>-addendum.md`** containing:
+> - **A** — what you verified structurally (with file:line), so the reviewer confirms rather than repeats it.
+> - **B** — defects found, each with the failure scenario, not just the rule broken. Mark any as **BLOCKING** that would ship a wrong or unsafe behaviour.
+> - **C** — review focus: what you could *not* verify and why, so the reviewer knows where to look hardest.
+> - **D** — a `[manual]` table of checks **only a human can do**, each with the exact command or click sequence and what a pass looks like. Leave the results column empty.
+>
+> **Be specific about what you could not test.** Live HRHub, a real Telegram delivery, a real mailbox, a browser layout at 375px — none are testable from here. Listing them honestly is more useful than a confident summary.
+>
+> **Do not fix anything, and do not run `git`.** You are the tester. Findings go back to the implementer; the reviewer commits.
+
+## Prompt 3 — reviewer (Haiku)
 
 Paste the implementer's Handoff report **below** this prompt.
 
-> You are reviewing a phase of **Sprout Automator** before it is committed. A coding model implemented it and produced the handoff report below.
+> You are the **reviewer** for a change to **Sprout Automator**, and you are the one who commits it. An implementer wrote it; a tester has already probed it and written `rebuild/reviews/<item>-addendum.md`.
 >
-> **The report is a claim, not evidence.** The model that wrote the code produced that summary; anything it omitted or misjudged is invisible in it. Verify independently:
+> **Read that addendum first** — section A is structural work already done (confirm, don't repeat), B is defects found, C is where the tester could not reach, D is the `[manual]` table the human filled in. **Section C is where you look hardest**: it is the list of things nobody has verified yet.
+>
+> **Neither the handoff report nor the addendum is evidence.** Verify independently:
 >
 > 1. **Read the actual diff** — `git status` and `git diff` — not just the files the report mentions. A file changed but unreported is itself a finding.
 > 2. **Re-run the gates yourself.** Do not trust pasted output.
@@ -110,7 +128,7 @@ Paste the implementer's Handoff report **below** this prompt.
 
 ---
 
-## Prompt C — screenshot triage (any vision model)
+## Prompt 4 — screenshot triage (any vision model)
 
 Only when a run fails at the clock step. The default coding model has no vision; this is the one task that needs it.
 
@@ -118,7 +136,7 @@ Only when a run fails at the clock step. The default coding model has no vision;
 
 ---
 
-## Environment notes — include with prompt A if the session will run anything
+## Environment notes — include with prompt 1 if the session will run anything
 
 > **Dev loop** (fast; do not rebuild Docker to test a code change):
 > ```bash

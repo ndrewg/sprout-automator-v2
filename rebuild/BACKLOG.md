@@ -43,23 +43,29 @@ Two places, and the order matters:
 
 State plainly in both: **a missed-run alert means "the automation didn't run", not "you aren't clocked in"** — someone who clocked in by hand still gets one. Without that sentence, people either panic or learn to ignore the alerts.
 
-## 6. Retry on transient failure
+## 6. Password reveal on every password field
+
+**Most acute exactly where it is missing.** `CredentialsPanel` and `NotificationsPanel` have a reveal toggle; **`AuthPage` (login / signup / forgot) and `ResetPasswordPage` do not** — and those are the fields with a **12-character minimum**, typed by someone creating or resetting a password they have never typed before, often on a phone. A mistyped password at signup is discovered on next login; at reset it locks the person out of the account they were mid-way through recovering.
+
+`RevealInput` is currently **duplicated verbatim** in both panels. The fix is to extract it to `components/ui/` (or `components/RevealInput.tsx`) and use the one implementation in all four places — not to write a third copy. Keep the existing behaviour: `InputGroup` + `InputGroupAddon` with an eye icon, `aria-label` toggling between "Show" and "Hide", `type` swapping between `password` and `text`.
+
+## 7. Retry on transient failure
 
 **A flaky portal at 05:30 currently costs the whole day.** The standing position — "the next scheduled run is the de-facto retry" (`01-PROJECT-BRIEF.md`) — is only true if *tomorrow* counts as a retry interval. For a clock-in it doesn't.
 
 `navigateToPortal` already retries 3× on server errors, so this covers failures *past* navigation: login timeouts, OTP never arriving, the clock dialog not appearing. One retry at +10 minutes, hard cap of two attempts, **only for `failure`** — never `skipped`, or a fail-safe verification skip turns into repeated clock attempts, which is exactly the double-clock the guard exists to prevent. Needs an `attempt` column on `runs` and care with the partial unique index so a retry can't collide with its own predecessor.
 
-## 7. Admin visibility
+## 8. Admin visibility
 
 **You currently learn a colleague's automation is broken when they tell you.** `users.is_admin` exists, is returned by `publicUser`, and gates nothing (`phase-4-security.md` § 4B.7 sketches it). Minimum useful version: an admin-only read endpoint listing each user's last run per action with status and timestamp. Not impersonation, not credential access — just "whose automation is failing". Rank rises sharply the moment anyone else is using this.
 
-## 8. OTP submission via Telegram reply
+## 9. OTP submission via Telegram reply
 
 **The manual OTP fallback is unusable in the one scenario it was built for.** At 05:30 you are asleep; if IMAP is slow the run waits five minutes and dies. The dashboard paste-in box only helps someone already awake and watching.
 
 Phase 6 landed the transport, the settings row and the routes, so the channel exists. What remains is the interactive half: a run waiting for OTP asks, and a reply satisfies the bridge. Needs long-polling `getUpdates` or a webhook (a webhook means a public HTTPS endpoint, so realistically after a real deploy), plus care that a code arriving from Telegram binds to the right `runId`. Biggest item here, and the most satisfying.
 
-## 9. Documentation drift (residual)
+## 10. Documentation drift (residual)
 
 `04-STACK-SCAFFOLD-AND-CONFIG.md` still names Vite 6 / TS 5.6 as targets; as-built is Vite 8 / TS 6. A note was added at the top of that file, but the dependency block below it still reads as though 6 were the target.
 
