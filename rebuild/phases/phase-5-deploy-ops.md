@@ -49,6 +49,28 @@ IP-only mode: `:443 { tls internal\n encode gzip\n reverse_proxy backend:3000 }`
 
 Bring up: `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build`, then `docker compose exec backend pnpm db:migrate` (first time / when migrations change).
 
+## 5.4b — Production environment (⚠️ this section postdates the original doc)
+
+Phases 6, 7, 4A.2, 4B and L each added config keys. `config.ts` is the authority; this is the deploy-time summary.
+
+**Hard-required — the app refuses to boot without them:**
+`DATABASE_URL`, `APP_ENCRYPTION_KEY` (64 hex chars), `SESSION_SECRET` (≥32 chars).
+
+**Required in production specifically:**
+- `NODE_ENV=production` — defaults to `development`, so the prod compose must set it explicitly rather than inherit from `.env`. Under `development` the session cookie is not `Secure`; under `production` it is, which is what you want behind Caddy.
+- `SIGNUP_ALLOWED` — already refuses to boot when empty in production (4A.2). Set it to the team domain plus any exact addresses.
+
+**⚠️ `APP_URL` is the silent one — fix this in the code, not just the runbook.** It defaults to `http://localhost:3000`. In production the app boots fine and everything appears to work, but **every password-reset and email-verification link points at localhost**, so a colleague clicking one gets nothing. Nothing warns, because a default exists.
+**Requirement for this phase:** extend `config.ts` so that in production an `APP_URL` whose host is `localhost` or `127.0.0.1` **refuses to start**, with a message naming the fix — the same shape as the existing `SIGNUP_ALLOWED` production guard. An invisible failure becomes a startup error.
+
+**Optional but worth setting:**
+- `RESEND_API_KEY` + `MAIL_FROM` — without them, reset and verification emails only reach the server log. The app is usable without mail; password reset effectively is not. Note the free tier needs one verified domain (see `BACKLOG.md` § 9).
+- `SPROUT_URL`, `MAX_CONCURRENT_RUNS` (drop to 2 on a 2 GB box), `MISSED_RUN_GRACE_MINUTES`, `AUTH_RATE_LIMIT` (raise if the team shares one NAT — `BACKLOG.md` § 3), `TZ=Asia/Manila`, `DATA_DIR`.
+
+**Not a config item, already handled:** `pino-pretty` is a devDependency the image's `--prod` install omits, so the logger guards the pretty transport (commit `60b99d6`). Don't reintroduce an unguarded transport.
+
+`DEPLOY.md` must carry this table, and the gate must prove the `APP_URL` guard fires.
+
 ## 5.5 — Backups
 
 - Nightly `pg_dump -Fc` (custom format) inside the Postgres container, gzipped to `~/backups`, retained ~14 days, via host `crontab` at 03:00 `TZ=Asia/Manila`.
