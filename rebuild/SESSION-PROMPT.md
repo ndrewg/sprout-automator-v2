@@ -93,6 +93,8 @@ Paste the implementer's Handoff report **below** this prompt.
 > - **tests that pass without asserting anything meaningful** — a suite that cannot fail is worse than none, because it looks like coverage
 > - anything in the phase file's contract that was silently skipped
 >
+> **If it is clean, PERFORM these steps yourself now.** Do not describe them, do not emit them as a checklist or as "next steps for the committer" — you are the committer. Run the commands. A review that ends in a plan instead of a commit has to be redone by hand, which has happened repeatedly.
+>
 > **If it is clean:**
 > 1. Update `rebuild/STATE.md` — move the item to "Built and verified", add any newly discovered "Known gaps".
 > 2. If reality diverged from the phase file, add a dated note to it: `> ⚠️ **As-built (found 2026-08):** …`
