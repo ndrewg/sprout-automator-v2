@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useRuns, useSubmitOtp } from "@/hooks/useRuns";
 import type { Run } from "@/api";
@@ -117,9 +117,14 @@ export function RunsPanel() {
                   const isOpen = expanded === run.id;
                   const steps = run.steps ?? [];
                   return (
-                    <>
+                    // Fragment carries the key, not the <tr> inside it: the key
+                    // must sit on the outermost element returned by map(), or
+                    // React falls back to index reconciliation. That bites here
+                    // — the list refetches every 1.5s while a run is active and
+                    // new runs are inserted at the TOP, so every index shifts
+                    // and the expanded detail row can attach to the wrong run.
+                    <Fragment key={run.id}>
                       <tr
-                        key={run.id}
                         className="cursor-pointer border-b hover:bg-muted/50"
                         onClick={() => setExpanded(isOpen ? null : run.id)}
                       >
@@ -184,7 +189,7 @@ export function RunsPanel() {
                           </tr>
                         ) : null}
                       </AnimatePresence>
-                    </>
+                    </Fragment>
                   );
                 })}
               </tbody>
