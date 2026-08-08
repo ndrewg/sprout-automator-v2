@@ -45,9 +45,11 @@ sprout.yourdomain.com {
     reverse_proxy backend:3000
 }
 ```
-IP-only mode: `:443 { tls internal\n encode gzip\n reverse_proxy backend:3000 }`.
+IP-only mode: **use `localhost { tls internal ... }`**, not `:443 { tls internal }` — Caddy's certificate automation only issues for named hostnames, so a bare port has no hostname and cert issuance fails.
 
 Bring up: `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build`, then `docker compose exec backend pnpm db:migrate` (first time / when migrations change).
+
+**As-built note (2026-08-08):** `Caddyfile` ships with both modes (domain + localhost); docker-compose.prod.yml uses `ports: !reset []` to stop the backend publishing 3000; Caddy ports are parameterized via `CADDY_HTTP_PORT` / `CADDY_HTTPS_PORT` env vars (defaults 80/443) so local testing on different ports is straightforward. `docker exec -T` was removed in Docker 29.5 — scripts use `-i` for stdin piping instead.
 
 ## 5.4b — Production environment (⚠️ this section postdates the original doc)
 

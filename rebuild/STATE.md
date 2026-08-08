@@ -28,6 +28,7 @@ Last updated: **2026-08-08**. Phases T, 6, 7, 4A.2 and all of 4B built, reviewed
 | Signup gating — email allowlist (§ 4A.2) | ✅ | `SIGNUP_ALLOWED` takes domains and exact addresses; optional in dev (allow-all + warning), **required in production or the app refuses to boot**. All six `[manual]` checks passed live, including the substring attack (`notorchard.com.au` → 403) and grandfathering (an address removed from the list could no longer sign up but still logged in). Rejections audit an `emailHash` only. See `reviews/phase-4A2-addendum.md`. **Not yet tagged** |
 | Linting wired up and proven (phase L) | ✅ | oxlint on **both** packages with the `correctness` category, plus `react/jsx-key` (`checkFragmentShorthand`), `react/exhaustive-deps`, and backend `no-floating-promises` / `no-misused-promises` / `prefer-await-to-then` (needs `oxlint-tsgolint` + `typeAware`). `pnpm lint` now runs in **CI and pre-commit**. Zero warnings baseline. **All four fault probes proven to fail the build**, including the fragment-shorthand missing key that triggered the round. The three sanctioned `.catch()` idioms carry narrow inline disables pointing at the rule. **Not tagged** |
 | Pause / leave days (schedule pause window + controls) | ✅ | commit `e6c81f9`; gates 7A + 7B green (66 unit, 48 integration, e2e desktop + mobile). **All seven `[manual]` checks passed live** — banner, "Skip tomorrow", **a paused day suppressed a real cron fire**, **no missed-run alert while paused and the alert returned once unpaused**, manual runs still work while paused, clearing restores normal, and a past window auto-expired with no user action. Migration `0002_pause.sql` applied to the dev DB and `pnpm dev` verified booting. See `reviews/phase-7-addendum.md`. **Not yet tagged** |
+| TLS deploy: `docker-compose.prod.yml`, `Caddyfile`, `DEPLOY.md`, `APP_URL` production guard, backups | ✅ | `docker-compose.prod.yml` + `Caddyfile` (both modes, localhost + domain); Caddy reverse proxy on 80/443, backend port reset; `DEPLOY.md` complete runbook; APP_URL production guard in `config.ts` with tests; `pg_dump --clean --if-exists` restore tested to scratch DB. VPS host hardening (§5.2) and live-domain TLS remain `[manual]`. Gate: `pnpm typecheck && pnpm test && pnpm test:integration && pnpm build` all green. Spec corrections: bare `:443 { tls internal }` doesn't work (no hostname for certs), use `localhost` instead; `docker exec -T` removed in Docker 29.5, use `-i` for stdin; Caddy ports parameterized (§5, overridable via env). See `reviews/phase-5-deploy-ops-addendum.md`. **Not yet tagged** |
 
 The app runs today via `docker compose up -d --build` on `http://localhost:3000` (see `RUNNING.md`). Backend tests live in `app/backend/test/` mirroring `src/`.
 
@@ -35,7 +36,6 @@ The app runs today via `docker compose up -d --build` on `http://localhost:3000`
 
 | Area | Where it's specified | Blocking? |
 |---|---|---|
-| TLS deploy: `docker-compose.prod.yml`, `Caddyfile`, `DEPLOY.md`, backups | `phases/phase-5-deploy-ops.md` | before leaving the LAN |
 | Everything else | `BACKLOG.md` | ranked there |
 
 ## Suggested order from here

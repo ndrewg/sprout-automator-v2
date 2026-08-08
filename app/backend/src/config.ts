@@ -59,6 +59,23 @@ export function loadConfig(): AppConfig {
         "comma-separated list of allowed email addresses and domains",
     );
   }
+  // 5.4b: the same refuse-to-start stance for APP_URL. The default is
+  // http://localhost:3000 — correct locally, but a SILENT failure in
+  // production: the app boots and everything appears to work while every
+  // password-reset and email-verification link points at localhost. Nothing
+  // warns, because a default exists. Fail at boot instead, naming the fix.
+  if (parsed.data.NODE_ENV === "production") {
+    const appUrlHost = new URL(parsed.data.APP_URL).hostname;
+    if (appUrlHost === "localhost" || appUrlHost === "127.0.0.1") {
+      throw new Error(
+        "Invalid environment configuration:\n" +
+          "  - APP_URL: host must not be localhost or 127.0.0.1 when " +
+          "NODE_ENV=production — set APP_URL to the public origin " +
+          "(e.g. https://sprout.yourdomain.com), or every password-reset and " +
+          "email-verification link points at the wrong host",
+      );
+    }
+  }
   return parsed.data;
 }
 

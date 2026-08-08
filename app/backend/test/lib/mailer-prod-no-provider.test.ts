@@ -16,6 +16,7 @@ describe("sendMail without a provider in production", () => {
   it("logs recipient + subject and warns, and never logs the body", async () => {
     vi.resetModules();
     vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("APP_URL", "https://sprout.yourdomain.com");
     vi.stubEnv("RESEND_API_KEY", "");
     vi.stubEnv("MAIL_FROM", "");
 

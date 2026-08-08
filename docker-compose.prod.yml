@@ -1,0 +1,60 @@
+# Phase 5 — production overlay. Applied ON TOP of docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# What it changes, and why (phase-5 §5.4):
+# 1. Adds a Caddy reverse proxy on 80/443 — the ONLY published ingress. Caddy
+#    does automatic HTTPS (public domain mode) or `tls internal` self-signed
+#    certs (IP/local mode) per the Caddyfile, and proxies to backend:3000 on
+#    the private sprout-net network.
+# 2. Stops the backend from publishing port 3000 (`ports: !reset []`) so it is
+#    reachable only from inside the network. This is the property the overlay
+#    exists for: on a VPS nothing but Caddy can talk to the app.
+# 3. Sets NODE_ENV=production explicitly, overriding the base file's
+#    `${NODE_ENV:-development}` interpolation from .env. Under production the
+#    session cookie is Secure, which is what you want behind Caddy.
+# 4. Passes through the production config keys the base file doesn't know
+#    about: APP_URL, SIGNUP_ALLOWED, RESEND_API_KEY, MAIL_FROM,
+#    MAX_CONCURRENT_RUNS, MISSED_RUN_GRACE_MINUTES, AUTH_RATE_LIMIT.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: sprout-caddy
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      # 80/443 on a real deploy. Overridable so the phase-5 gate can run
+      # locally when those host ports are already taken (e.g. a ddev haproxy):
+      #   CADDY_HTTP_PORT=8080 CADDY_HTTPS_PORT=8443
+      #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+      - "${CADDY_HTTP_PORT:-80}:80"
+      - "${CADDY_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - sprout-net
+
+  backend:
+    environment:
+      NODE_ENV: production
+      APP_URL: ${APP_URL:-https://sprout.yourdomain.com}
+      # Empty-by-default optional keys are passed through so the base file's
+      # silence doesn't read as "unset" in a different way: SIGNUP_ALLOWED and
+      # MAIL_FROM/RESEND_API_KEY below. Empty values are handled correctly by
+      # config.ts (production refuses to boot without SIGNUP_ALLOWED).
+      SIGNUP_ALLOWED: ${SIGNUP_ALLOWED:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-3}
+      MISSED_RUN_GRACE_MINUTES: ${MISSED_RUN_GRACE_MINUTES:-20}
+      AUTH_RATE_LIMIT: ${AUTH_RATE_LIMIT:-10}
+    # `!reset` EMPTIES the base file's ports list on merge instead of appending
+    # to it — the backend stops publishing 3000 and only Caddy reaches it.
+    ports: !reset []
+
+volumes:
+  caddy_data:
+  caddy_config:

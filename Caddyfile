@@ -1,0 +1,35 @@
+# Caddyfile — Sprout Automator reverse proxy (Caddy v2, mounted into the
+# `caddy` service of docker-compose.prod.yml).
+#
+# Two modes, one file. Exactly one site block is active; comment the other out.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# MODE 1 — PUBLIC DOMAIN (the real deploy, phase-5 §5.4)
+# ─────────────────────────────────────────────────────────────────────────────
+# Point a DNS A record at the VPS, then activate this block (uncomment it and
+# comment out the `localhost` block below). Caddy obtains and renews a real
+# Let's Encrypt certificate automatically — no `tls` directive needed:
+#
+#   sprout.yourdomain.com {
+#       encode gzip
+#       reverse_proxy backend:3000
+#   }
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# MODE 2 — IP / LOCAL (no public domain, or pre-VPS testing)
+# ─────────────────────────────────────────────────────────────────────────────
+# Active by default. The site address is a HOSTNAME (not a bare `:443`):
+# Caddy's certificate automation only issues for named hostnames, so a bare
+# `:443 { tls internal }` block serves nothing (handshakes fail with an
+# "internal error" alert — there is no cert). `tls internal` makes Caddy issue
+# a self-signed cert from its internal CA, so the full TLS path works with no
+# DNS name. Reach the app at https://localhost/ and accept the self-signed
+# cert (curl -k, or the browser's "not secure" bypass). On a LAN, replace
+# `localhost` with the host's IP or LAN name (Caddy's internal CA issues for
+# those too). This is what the phase-5 gate proves locally.
+
+localhost {
+	tls internal
+	encode gzip
+	reverse_proxy backend:3000
+}

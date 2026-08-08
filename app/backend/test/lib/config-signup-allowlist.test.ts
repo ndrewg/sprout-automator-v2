@@ -38,6 +38,9 @@ describe("config: SIGNUP_ALLOWED in production", () => {
   it("starts when SIGNUP_ALLOWED lists at least one address or domain", () => {
     process.env["NODE_ENV"] = "production";
     process.env["SIGNUP_ALLOWED"] = "orchard.com.au";
+    // APP_URL must also pass its production guard (5.4b) or this "starts"
+    // case would be refused for a different reason.
+    process.env["APP_URL"] = "https://sprout.yourdomain.com";
     expect(() => loadConfig()).not.toThrow();
   });
 });
