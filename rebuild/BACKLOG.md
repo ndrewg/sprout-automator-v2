@@ -2,7 +2,9 @@
 
 Everything known-missing that isn't already a phase file, ordered by *when it will actually hurt you*, not by effort. Each entry says what breaks without it, so a future session can re-rank on evidence rather than vibes.
 
-**Re-ranked 2026-08-08**, after phases T, 6, 7, 4A.2, 4B, L and 5 all landed. Four former entries are now done — see "Closed" at the bottom. **Updated 2026-08-10:** items #2 and #4 completed.
+**Re-ranked 2026-08-08**, after phases T, 6, 7, 4A.2, 4B, L and 5 all landed. Four former entries are now done — see "Closed" at the bottom. **Updated 2026-08-10:** run-executor failure hardening completed (see "Closed").
+
+**Updated 2026-08-11 — the ranking now assumes a possible ~30-user rollout**, which changes the character of the top items. § 3, § 4 and § 5 are no longer improvements; they are launch blockers, and § 3 cannot be closed without § 4. A new § 4 was inserted, so **items below it shifted by one** — old § 4–9 are now § 5–10.
 
 ---
 
@@ -27,7 +29,21 @@ Three options; **this needs a deliberate decision, not whichever is easiest to i
 - **Key by email with a looser IP backstop** (per-account 5/15 min, per-IP 30/15 min). Correct semantics — a brute-forcer targets an account, not an IP — but needs a per-email counter covering the "no such user" path too, keyed on the submitted (lowercased) address.
 - **Give the reset endpoints their own limiter.** Stops a reset flow consuming the login budget; still leaves two humans sharing one budget within an endpoint.
 
-## 4. Onboarding material + the Gmail-only constraint in the fine print
+## 4. `docker-compose.yml` silently drops seven config keys
+
+**Discovered 2026-08-11.** `config.ts` reads fourteen env keys; the compose `backend.environment` block passes **seven**: `NODE_ENV`, `PORT`, `DATABASE_URL`, `APP_ENCRYPTION_KEY`, `SESSION_SECRET`, `DATA_DIR`, `SPROUT_URL` (plus `TZ`). Missing:
+
+`APP_URL`, `AUTH_RATE_LIMIT`, `MAIL_FROM`, `MAX_CONCURRENT_RUNS`, `MISSED_RUN_GRACE_MINUTES`, `RESEND_API_KEY`, `SIGNUP_ALLOWED`
+
+**Setting any of these in the root `.env` does nothing when running under Docker, with no warning** — the container never sees them, so each falls back to its default. `.env.example` documents keys the deployed app cannot actually receive.
+
+Sharpest consequence: **the cheapest fix for § 3 is unreachable.** That item's chosen remedy is "raise `AUTH_RATE_LIMIT` to 30 — it's already a config change, no code needed" — but through Compose it is stuck at 10 regardless of what `.env` says. § 3 cannot be closed without this.
+
+The rest fail in the same quiet way: `APP_URL` stays `http://localhost:3000`, so every reset and verification link is dead; `RESEND_API_KEY`/`MAIL_FROM` are ignored, so mail silently never sends; `SIGNUP_ALLOWED` falls back to dev allow-all. Two of these (`APP_URL`, `SIGNUP_ALLOWED`) have production guards that refuse to boot, so `NODE_ENV=production` turns them into a loud failure instead — but the base compose defaults to `development`, which is exactly where they stay silent.
+
+Add the seven to `backend.environment` with `${KEY}` passthrough, defaulting only where `config.ts` already does. Ten minutes, and it unblocks § 3.
+
+## 5. Onboarding material + the Gmail-only constraint in the fine print
 
 **Before you invite anyone.** `lib/imap-otp.ts` hardcodes `imap.gmail.com:993` — fine for Gmail *and* Google Workspace domains (same host, App Passwords identical), useless for Microsoft 365 or anything else. Anyone whose HRHub codes land in a non-Google mailbox needs a forwarding rule into Gmail before the tool works for them at all.
 
@@ -37,29 +53,29 @@ Two places, and the order matters:
 
 State plainly in both: **a missed-run alert means "the automation didn't run", not "you aren't clocked in"** — someone who clocked in by hand still gets one. Without that sentence, people either panic or learn to ignore the alerts.
 
-## 5. Password reveal on every password field
+## 6. Password reveal on every password field
 
 **Most acute exactly where it is missing.** `CredentialsPanel` and `NotificationsPanel` have a reveal toggle; **`AuthPage` (login / signup / forgot) and `ResetPasswordPage` do not** — and those are the fields with a **12-character minimum**, typed by someone creating or resetting a password they have never typed before, often on a phone. A mistyped password at signup is discovered on next login; at reset it locks the person out of the account they were mid-way through recovering.
 
 `RevealInput` is currently **duplicated verbatim** in both panels. The fix is to extract it to `components/ui/` (or `components/RevealInput.tsx`) and use the one implementation in all four places — not to write a third copy. Keep the existing behaviour: `InputGroup` + `InputGroupAddon` with an eye icon, `aria-label` toggling between "Show" and "Hide", `type` swapping between `password` and `text`.
 
-## 6. Retry on transient failure
+## 7. Retry on transient failure
 
 **A flaky portal at 05:30 currently costs the whole day.** The standing position — "the next scheduled run is the de-facto retry" (`01-PROJECT-BRIEF.md`) — is only true if *tomorrow* counts as a retry interval. For a clock-in it doesn't.
 
 `navigateToPortal` already retries 3× on server errors, so this covers failures *past* navigation: login timeouts, OTP never arriving, the clock dialog not appearing. One retry at +10 minutes, hard cap of two attempts, **only for `failure`** — never `skipped`, or a fail-safe verification skip turns into repeated clock attempts, which is exactly the double-clock the guard exists to prevent. Needs an `attempt` column on `runs` and care with the partial unique index so a retry can't collide with its own predecessor.
 
-## 7. Admin visibility
+## 8. Admin visibility
 
 **You currently learn a colleague's automation is broken when they tell you.** `users.is_admin` exists, is returned by `publicUser`, and gates nothing (`phase-4-security.md` § 4B.7 sketches it). Minimum useful version: an admin-only read endpoint listing each user's last run per action with status and timestamp. Not impersonation, not credential access — just "whose automation is failing". Rank rises sharply the moment anyone else is using this.
 
-## 8. OTP submission via Telegram reply
+## 9. OTP submission via Telegram reply
 
 **The manual OTP fallback is unusable in the one scenario it was built for.** At 05:30 you are asleep; if IMAP is slow the run waits five minutes and dies. The dashboard paste-in box only helps someone already awake and watching.
 
 Phase 6 landed the transport, the settings row and the routes, so the channel exists. What remains is the interactive half: a run waiting for OTP asks, and a reply satisfies the bridge. Needs long-polling `getUpdates` or a webhook (a webhook means a public HTTPS endpoint, so realistically after a real deploy), plus care that a code arriving from Telegram binds to the right `runId`. Biggest item here, and the most satisfying.
 
-## 9. Documentation drift (residual)
+## 10. Documentation drift (residual)
 
 `04-STACK-SCAFFOLD-AND-CONFIG.md` still names Vite 6 / TS 5.6 as targets; as-built is Vite 8 / TS 6. A note was added at the top of that file, but the dependency block below it still reads as though 6 were the target.
 

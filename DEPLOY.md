@@ -133,7 +133,9 @@ localhost.
 **Requirement for this phase:** extend `config.ts` so that in production an `APP_URL` whose host is `localhost` or `127.0.0.1` **refuses to start**, with a message naming the fix — the same shape as the existing `SIGNUP_ALLOWED` production guard. An invisible failure becomes a startup error.
 
 **Optional but worth setting:**
-- `RESEND_API_KEY` + `MAIL_FROM` — without them, reset and verification emails only reach the server log. The app is usable without mail; password reset effectively is not. Note the free tier needs one verified domain (see `BACKLOG.md` § 9).
+- `RESEND_API_KEY` + `MAIL_FROM` — without them, reset and verification emails only reach the server log. The app is usable without mail; password reset effectively is not. Note the free tier needs **one verified domain with SPF/DKIM DNS records**: the built-in `onboarding@resend.dev` sender only delivers to your own Resend account address, so it cannot reach colleagues.
+
+> ⚠️ **As-built (found 2026-08-11):** the **base** `docker-compose.yml` does not pass most of the keys in this section through to the container — only `NODE_ENV`, `PORT`, `DATABASE_URL`, `APP_ENCRYPTION_KEY`, `SESSION_SECRET`, `DATA_DIR`, `SPROUT_URL` and `TZ`. Setting `APP_URL`, `AUTH_RATE_LIMIT`, `MAIL_FROM`, `MAX_CONCURRENT_RUNS`, `MISSED_RUN_GRACE_MINUTES`, `RESEND_API_KEY` or `SIGNUP_ALLOWED` in `.env` **silently has no effect under Docker**. See `BACKLOG.md` § 4; fix that before relying on any value below.
 - `SPROUT_URL`, `MAX_CONCURRENT_RUNS` (drop to 2 on a 2 GB box), `MISSED_RUN_GRACE_MINUTES`, `AUTH_RATE_LIMIT` (raise if the team shares one NAT — `BACKLOG.md` § 3), `TZ=Asia/Manila`, `DATA_DIR`.
 
 **Not a config item, already handled:** `pino-pretty` is a devDependency the image's `--prod` install omits, so the logger guards the pretty transport (commit `60b99d6`). Don't reintroduce an unguarded transport.
