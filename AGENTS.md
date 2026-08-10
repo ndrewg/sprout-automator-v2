@@ -17,15 +17,18 @@ You are implementing the Sprout Automator from the spec in `rebuild/`. **All arc
 ## Model routing
 The default model has **no vision**. One task in this project needs it: when a run fails at the clock step, the screenshots in `data/screenshots/<userId>/<runId>/` are the only signal for whether HRHub changed its markup. **Hand that task to a vision-capable model** along with `rebuild/reference/hrhub-automation-playbook.md`; don't guess at selector drift from text alone, and don't burn a multimodal model on ordinary coding turns. Everything else — code, tests, migrations, review — is text-only by design, which is why the gates are executable.
 
-## The loop: implement → verify → report → review → commit
+## The loop: implement → verify → report → test → review → commit
 
-Two models, two separate sessions, a human relaying between them. **The implementer never runs `git`; only the reviewer commits.**
+**Three separate sessions, a human relaying between them.** Full prompts for each role are in `rebuild/SESSION-PROMPT.md`. **Only the reviewer runs `git`.**
 
-1. **Implement** (coding model) — work the phase **gate by gate**. A gate is a verification checkpoint: run it, and do not start the next gate until it is green. Continue to the end of the phase. Do not stop at each gate.
-2. **Verify** — `pnpm typecheck && pnpm test` (+ `pnpm test:integration` / `pnpm test:e2e` where the phase says so). **Never proceed past a red gate by explaining why the failure is acceptable.** If you cannot make it green, stop and report that.
-3. **Report** — at the end of the phase, emit the **Handoff report** below. This is the deliverable. The human pastes it into the reviewer's session.
-4. **Review** (reviewer model, fresh session) — the report is a *claim*, not evidence. Read the actual diff, re-run the gates yourself. See below.
-5. **Commit** (reviewer, only after its own review passes).
+1. **Implement** (coding model) — work the item **gate by gate**. A gate is a verification checkpoint: run it, and do not start the next until it is green. Continue to the end of the item. Do not stop at each gate.
+2. **Verify** — `pnpm typecheck && pnpm test` (+ `pnpm test:integration` / `pnpm test:e2e` where the item says so). **Never proceed past a red gate by explaining why the failure is acceptable.** If you cannot make it green, stop and report that.
+3. **Report** — emit the **Handoff report** below. This is the deliverable.
+4. **Test** (fresh session — *not* the implementer's, which would inherit its blind spots). The tester's job is to **try to make the report's claims false**: re-run every gate, diff the report against the actual changes, break each new test to prove it can fail, attack the change, query the database directly. It writes `rebuild/reviews/<item>-addendum.md` and lists what only a human can check. It does not fix anything and does not run `git`.
+5. **Review** (reviewer model, fresh session) — reads the diff against these rules and the tester's addendum. Neither the report nor the addendum is evidence; re-run the gates. Section C of the addendum ("what I could not verify") is where to look hardest.
+6. **Commit** (reviewer, only after its own review passes).
+
+**What none of them replaces:** in this build, review caught the invisible defects — a privilege escalation, an unrate-limited endpoint — while *a human using the app* caught eleven others, every one of them while the gates were green. The `[manual]` section of an addendum is not ceremony; it has historically found more than the rest combined.
 
 ### The Handoff report (the implementer's final output — always emit this)
 

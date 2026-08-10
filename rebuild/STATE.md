@@ -2,7 +2,7 @@
 
 Read this first, before any phase file. The phase docs describe a *plan*; this describes the *reality*. When they disagree, this file wins and the phase file needs a correction note.
 
-Last updated: **2026-08-08**. Phases T, 6, 7, 4A.2 and all of 4B built, reviewed and committed. 4B was split across two rounds: mailer + password reset + idle timeout (round 1), then email verification + account deletion (round 2). **4B.6 (data export) and 4B.7 (monitoring hooks) were deliberately skipped** — export is ceremony for a handful of users, and admin visibility is ranked in `BACKLOG.md` instead — so 4B is functionally complete. Every `[manual]` check passed. Phase 6 is tagged; T, 7 and 4 are not.
+Last updated: **2026-08-10**. **Every phase is complete** — 0–3 from the original build, plus T, 4A.2, 4B, L, 5, 6 and 7. Remaining work is `BACKLOG.md` and two `[manual]` items that need a real VPS. 4B was split across two rounds: mailer + password reset + idle timeout (round 1), then email verification + account deletion (round 2). **4B.6 (data export) and 4B.7 (monitoring hooks) were deliberately skipped** — export is ceremony for a handful of users, and admin visibility is ranked in `BACKLOG.md` instead — so 4B is functionally complete. Every `[manual]` check passed. **Tagged:** 0, 1, 2, 3, T, 4A2, 6, 7. **Untagged:** 4 (all of 4B), L, 5 — the human tags, since only they can confirm the `[manual]` checks.
 
 ---
 
@@ -41,9 +41,10 @@ The app runs today via `docker compose up -d --build` on `http://localhost:3000`
 
 ## Suggested order from here
 
-The goal is **all the code finished and verified locally in Docker**, with no VPS yet. That is achievable for everything except the parts that need a real host.
+All phases are done. What is left:
 
-1. **Phase 5 artifacts** — `docker-compose.prod.yml`, `Caddyfile`, `DEPLOY.md`, the backup script. **Write and verify these locally**: Caddy's `tls internal` issues a self-signed cert, so the full TLS path, the "backend port not published" property, and the `pg_dump`/restore cycle can all be proven on your own machine. What genuinely needs the VPS is only §5.2 (host hardening) and the live-TLS gate item — mark those `[manual]` and leave them.
+1. **`BACKLOG.md`** — ten ranked items, none load-bearing. #3 (screenshot pruning) and #4 (rate limiter, decision made: raise `AUTH_RATE_LIMIT` to 30) are the next sensible ones; #5 (onboarding + the Gmail-only constraint) matters before inviting anyone.
+2. **The two `[manual]` deploy items** — VPS host hardening (`phase-5-deploy-ops.md` § 5.2) and live-domain TLS. Both need a real host; everything else about the deploy is proven locally.
 
 Working prompts for each round are in [`SESSION-PROMPT.md`](./SESSION-PROMPT.md).
 
