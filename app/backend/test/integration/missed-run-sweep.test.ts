@@ -157,4 +157,89 @@ describe("missed-run reconciliation sweep", () => {
       await db.$count(missedRunNotices, eq(missedRunNotices.userId, userId)),
     ).toBe(0);
   });
+
+  it("marks notified_at after a successful send, and a set notified_at never re-dispatches", async () => {
+    const { userId } = await userWithSchedule();
+    const sent: string[] = [];
+    const deps = {
+      ...defaultSweepDeps,
+      now: () => FIXED_NOW,
+      isWorkday: () => true,
+      dispatchMissed: async (_uid: string, html: string) => {
+        sent.push(html);
+        return "sent" as const;
+      },
+    };
+
+    // First sweep: insert wins → claimed → dispatch sent → notified_at set.
+    await sweepMissedRuns(deps);
+    expect(sent).toHaveLength(1);
+    const [afterFirst] = await db
+      .select()
+      .from(missedRunNotices)
+      .where(eq(missedRunNotices.userId, userId))
+      .limit(1);
+    expect(afterFirst?.notifiedAt).not.toBeNull();
+
+    // Second sweep: the row exists and is notified → "done" → no dispatch.
+    await sweepMissedRuns(deps);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("a notice row with notified_at NULL (earlier send failed) is retried by the next sweep", async () => {
+    const { userId } = await userWithSchedule();
+    // Simulates a Telegram outage: the notice row exists from a failed send.
+    await db.insert(missedRunNotices).values({
+      userId,
+      manilaDate: "2026-08-10",
+      action: "in",
+    });
+    const sent: string[] = [];
+    const deps = {
+      ...defaultSweepDeps,
+      now: () => FIXED_NOW,
+      isWorkday: () => true,
+      dispatchMissed: async (_uid: string, html: string) => {
+        sent.push(html);
+        return "sent" as const;
+      },
+    };
+
+    await sweepMissedRuns(deps);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("Clock-in did not run");
+    const [notice] = await db
+      .select()
+      .from(missedRunNotices)
+      .where(eq(missedRunNotices.userId, userId))
+      .limit(1);
+    expect(notice?.notifiedAt).not.toBeNull();
+    // Still exactly one row — the retry reused it, it did not double-insert.
+    expect(
+      await db.$count(missedRunNotices, eq(missedRunNotices.userId, userId)),
+    ).toBe(1);
+  });
+
+  it("a notice row with notified_at set is never re-dispatched", async () => {
+    const { userId } = await userWithSchedule();
+    await db.insert(missedRunNotices).values({
+      userId,
+      manilaDate: "2026-08-10",
+      action: "in",
+      notifiedAt: new Date("2026-08-10T06:00:00+08:00"),
+    });
+    const sent: string[] = [];
+    const deps = {
+      ...defaultSweepDeps,
+      now: () => FIXED_NOW,
+      isWorkday: () => true,
+      dispatchMissed: async (_uid: string, html: string) => {
+        sent.push(html);
+        return "sent" as const;
+      },
+    };
+
+    await sweepMissedRuns(deps);
+    expect(sent).toHaveLength(0);
+  });
 });

@@ -29,6 +29,13 @@
       "when": 1786110548847,
       "tag": "0003_reset_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786349251523,
+      "tag": "0004_notified_at_on_missed_notices",
+      "breakpoints": true
     }
   ]
 }

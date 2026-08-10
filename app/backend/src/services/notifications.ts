@@ -256,11 +256,20 @@ export type SweepDeps = {
     action: ClockAction,
     dateStr: string,
   ) => Promise<boolean>;
+  // "claimed" = this sweep inserted the notice row and owns the send.
+  // "retry"  = the row already exists but was never notified (send failed or
+  //            was skipped earlier) — a later sweep may try again.
+  // "done"   = the row exists and was notified — never send twice.
   tryInsertMissedNotice: (
     userId: string,
     action: ClockAction,
     dateStr: string,
-  ) => Promise<boolean>;
+  ) => Promise<"claimed" | "retry" | "done">;
+  markNoticeNotified: (
+    userId: string,
+    action: ClockAction,
+    dateStr: string,
+  ) => Promise<void>;
   dispatchMissed: (userId: string, html: string) => Promise<DispatchOutcome>;
 };
 
@@ -289,7 +298,9 @@ export const defaultSweepDeps: SweepDeps = {
   tryInsertMissedNotice: async (userId, action, dateStr) => {
     // The database decides who sends, not application logic: onConflictDoNothing
     // means a conflicting (user, date, action) returns NO row, and only a real
-    // insert returns one. Two overlapping sweeps cannot double-notify.
+    // insert returns one. Two overlapping sweeps cannot double-insert. When the
+    // insert loses the conflict, the existing row decides (backlog #4): if it
+    // was never notified, a later sweep retries the send; if it was, skip.
     const [inserted] = await db
       .insert(missedRunNotices)
       .values({ userId, manilaDate: dateStr, action })
@@ -301,7 +312,31 @@ export const defaultSweepDeps: SweepDeps = {
         ],
       })
       .returning();
-    return inserted !== undefined;
+    if (inserted !== undefined) return "claimed";
+    const [existing] = await db
+      .select({ notifiedAt: missedRunNotices.notifiedAt })
+      .from(missedRunNotices)
+      .where(
+        and(
+          eq(missedRunNotices.userId, userId),
+          eq(missedRunNotices.manilaDate, dateStr),
+          eq(missedRunNotices.action, action),
+        ),
+      )
+      .limit(1);
+    return existing?.notifiedAt == null ? "retry" : "done";
+  },
+  markNoticeNotified: async (userId, action, dateStr) => {
+    await db
+      .update(missedRunNotices)
+      .set({ notifiedAt: new Date() })
+      .where(
+        and(
+          eq(missedRunNotices.userId, userId),
+          eq(missedRunNotices.manilaDate, dateStr),
+          eq(missedRunNotices.action, action),
+        ),
+      );
   },
   dispatchMissed: async (userId, html) => dispatch(userId, html, "missed"),
 };
@@ -337,15 +372,23 @@ export async function sweepMissedRuns(
         const hasRun = await deps.hasRunToday(row.userId, action, todayStr);
         if (hasRun) continue;
 
-        const claimed = await deps.tryInsertMissedNotice(
+        const claim = await deps.tryInsertMissedNotice(
           row.userId,
           action,
           todayStr,
         );
-        if (!claimed) continue;
+        if (claim === "done") continue;
 
         const html = renderMissedMessage(action, timeStr, todayStr);
-        await deps.dispatchMissed(row.userId, html);
+        const outcome = await deps.dispatchMissed(row.userId, html);
+        // Only a successful send is terminal. A failed — or deliberately
+        // skipped — send leaves notified_at NULL so a later sweep retries it;
+        // the missed alert is precisely the one where silence is worst
+        // (backlog #4). The unique index already prevents a double-notify for
+        // successful sends, so the insert-then-send order stays.
+        if (outcome === "sent") {
+          await deps.markNoticeNotified(row.userId, action, todayStr);
+        }
       }
     }
   } catch (err: unknown) {

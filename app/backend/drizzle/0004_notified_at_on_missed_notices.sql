@@ -1,0 +1,1 @@
+ALTER TABLE "missed_run_notices" ADD COLUMN "notified_at" timestamp with time zone;

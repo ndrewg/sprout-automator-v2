@@ -436,6 +436,7 @@ describe("expectedFireTime / isWeekend", () => {
 type SweepCalls = {
   dispatched: string[];
   inserted: string[];
+  marked: string[];
   loaded: number;
 };
 
@@ -443,7 +444,7 @@ function makeSweepDeps(overrides: Partial<SweepDeps> = {}): {
   deps: SweepDeps;
   calls: SweepCalls;
 } {
-  const calls: SweepCalls = { dispatched: [], inserted: [], loaded: 0 };
+  const calls: SweepCalls = { dispatched: [], inserted: [], marked: [], loaded: 0 };
   const deps: SweepDeps = {
     now: () => new Date("2026-08-10T05:55:00+08:00"), // Monday, 25min past 05:30
     isWorkday: () => true,
@@ -465,7 +466,10 @@ function makeSweepDeps(overrides: Partial<SweepDeps> = {}): {
     hasRunToday: async () => false,
     tryInsertMissedNotice: async (userId, action, dateStr) => {
       calls.inserted.push(`${userId}:${action}:${dateStr}`);
-      return true;
+      return "claimed";
+    },
+    markNoticeNotified: async (userId, action, dateStr) => {
+      calls.marked.push(`${userId}:${action}:${dateStr}`);
     },
     dispatchMissed: async (_userId, html) => {
       calls.dispatched.push(html);
@@ -477,13 +481,15 @@ function makeSweepDeps(overrides: Partial<SweepDeps> = {}): {
 }
 
 describe("sweepMissedRuns", () => {
-  it("misses the in-run past grace → one notice + one dispatch; second sweep is idempotent", async () => {
-    let claim = true;
+  it("misses the in-run past grace → one notice + one dispatch + notified; second sweep is idempotent", async () => {
+    let claim: "claimed" | "done" = "claimed";
     const { deps, calls } = makeSweepDeps({
       tryInsertMissedNotice: async (userId, action, dateStr) => {
         calls.inserted.push(`${userId}:${action}:${dateStr}`);
+        // The unique index now rejects a duplicate insert, and the existing
+        // row was notified by the first sweep — so it reads as "done".
         const result = claim;
-        claim = false; // the unique index now rejects a duplicate insert
+        claim = "done";
         return result;
       },
     });
@@ -493,6 +499,7 @@ describe("sweepMissedRuns", () => {
     expect(calls.inserted).toEqual(["u1:in:2026-08-10"]);
     expect(calls.dispatched).toHaveLength(1);
     expect(calls.dispatched[0]).toContain("Clock-in did not run");
+    expect(calls.marked).toEqual(["u1:in:2026-08-10"]);
 
     await sweepMissedRuns(deps);
     expect(calls.inserted).toEqual([
@@ -500,6 +507,52 @@ describe("sweepMissedRuns", () => {
       "u1:in:2026-08-10", // attempted again…
     ]);
     expect(calls.dispatched).toHaveLength(1); // …but no second dispatch
+    expect(calls.marked).toEqual(["u1:in:2026-08-10"]);
+  });
+
+  it("a failed send leaves the notice un-notified so the next sweep retries it", async () => {
+    // dispatchMissed fails (Telegram outage, backlog #4): markNoticeNotified
+    // must NOT run, and the same row is claimed-and-retried next sweep.
+    const { deps, calls } = makeSweepDeps({
+      dispatchMissed: async (_uid, html) => {
+        calls.dispatched.push(html);
+        return "failed";
+      },
+    });
+    await sweepMissedRuns(deps);
+    expect(calls.dispatched).toHaveLength(1);
+    expect(calls.marked).toEqual([]);
+
+    await sweepMissedRuns(deps);
+    // The unique index still rejects the re-insert, but the existing row's
+    // notified_at is NULL → "retry", so it dispatches again.
+    expect(calls.dispatched).toHaveLength(2);
+    expect(calls.marked).toEqual([]);
+  });
+
+  it("a notice that was never notified (NULL) is re-dispatched by a later sweep", async () => {
+    const { deps, calls } = makeSweepDeps({
+      tryInsertMissedNotice: async (userId, action, dateStr) => {
+        calls.inserted.push(`${userId}:${action}:${dateStr}`);
+        return "retry"; // row exists from a failed earlier send
+      },
+    });
+    await sweepMissedRuns(deps);
+    expect(calls.dispatched).toHaveLength(1);
+    expect(calls.marked).toEqual(["u1:in:2026-08-10"]);
+  });
+
+  it("a notice already notified (notified_at set) is never re-dispatched", async () => {
+    const { deps, calls } = makeSweepDeps({
+      tryInsertMissedNotice: async (userId, action, dateStr) => {
+        calls.inserted.push(`${userId}:${action}:${dateStr}`);
+        return "done";
+      },
+    });
+    await sweepMissedRuns(deps);
+    expect(calls.inserted).toEqual(["u1:in:2026-08-10"]);
+    expect(calls.dispatched).toEqual([]);
+    expect(calls.marked).toEqual([]);
   });
 
   it("a run exists today (any status) → no notice and no dispatch", async () => {

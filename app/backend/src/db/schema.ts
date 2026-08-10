@@ -188,6 +188,11 @@ export const missedRunNotices = pgTable(
     // not an instant, and manilaDateString() already produces exactly this.
     manilaDate: text("manila_date").notNull(),
     action: text("action", { enum: ["in", "out"] }).notNull(),
+    // When the notice was successfully dispatched (backlog #4). NULL means the
+    // send failed or was skipped and a later sweep may retry once the row still
+    // exists — the unique index prevents a second INSERT, so the retry path is
+    // "find the existing NULL row and dispatch again", never a new row.
+    notifiedAt: timestamp("notified_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

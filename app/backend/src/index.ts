@@ -6,6 +6,18 @@ import { recoverOrphanedRuns, runQueue } from "./services/run-queue";
 import { executeQueuedRun } from "./services/runs";
 import { loadAllSchedules, startMissedRunSweep } from "./services/scheduler";
 
+// Backstop for anything the run executor's .catch or the app's error handler
+// miss: log and keep serving. A scheduler that dies on an unrelated rejection
+// is worse than one that logs it — since Node 15 an unhandled rejection would
+// otherwise terminate the process, and the whole point of this app is that it
+// is still alive at 05:30 (backlog #2).
+process.on("unhandledRejection", (reason: unknown) => {
+  logger.error({ err: reason }, "unhandled promise rejection");
+});
+process.on("uncaughtException", (err: Error) => {
+  logger.error({ err }, "uncaught exception");
+});
+
 async function start(): Promise<void> {
   // 4A.2: in development an unset SIGNUP_ALLOWED means signup is open. Warn
   // once so a future public deploy doesn't happen by accident. (Production

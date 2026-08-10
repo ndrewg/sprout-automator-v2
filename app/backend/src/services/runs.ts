@@ -107,58 +107,64 @@ export async function executeQueuedRun(runId: string): Promise<void> {
     return;
   }
 
-  const [cred] = await db
-    .select()
-    .from(credentials)
-    .where(eq(credentials.userId, run.userId))
-    .limit(1);
-
-  // Decrypted credentials live ONLY as locals here — never logged, never on req.
-  const username = cred ? decryptOptional(cred.sproutUsernameEnc) : null;
-  const password = cred ? decryptOptional(cred.sproutPasswordEnc) : null;
-  if (!username || !password) {
-    // Worth notifying about precisely because the user won't otherwise
-    // discover their config is broken until payday.
-    await finalizeRun(run, {
-      status: "failure",
-      error: "No Sprout credentials available for this run",
-    });
-    return;
-  }
-
-  const gmailEmail = cred ? decryptOptional(cred.gmailEmailEnc) : null;
-  const gmailAppPassword = cred ? decryptOptional(cred.gmailAppPasswordEnc) : null;
-  const imapAvailable = !!(gmailEmail && gmailAppPassword);
-
-  await db.update(runs).set({ status: "running" }).where(eq(runs.id, runId));
-  logger.info({ runId, action: run.action }, "run started");
-
-  const log = (message: string): void => {
-    // Mirror each step to the backend logger AND persist it to runs.steps so
-    // run progress is visible in the server logs, not only in the UI.
-    logger.info({ runId }, message);
-    void appendRunStep(runId, message);
-  };
-
-  // OTP acquisition races the manual bridge against IMAP polling; first wins,
-  // and the loser is stopped in the finally.
+  // Everything that can fail at runtime — the credentials select, the decrypt
+  // (a wrong APP_ENCRYPTION_KEY throws here), the runAutomation step, the
+  // terminal write — lives inside ONE try so any of them takes the normal
+  // failure path and reaches finalizeRun. A rejection that escapes this
+  // function would otherwise bypass finalizeRun entirely and kill the process
+  // (backlog #2: decrypt used to sit outside this try).
   const otpAbort = new AbortController();
-  const waitForOtpCode = (): Promise<string> => {
-    const manual = waitForOtp(runId);
-    if (imapAvailable && gmailEmail && gmailAppPassword) {
-      const imap = pollForOtp(
-        { email: gmailEmail, appPassword: gmailAppPassword },
-        { signal: otpAbort.signal },
-      );
-      return Promise.any([manual, imap]).finally(() => {
-        otpAbort.abort();
-        cancelWait(runId);
-      });
-    }
-    return manual;
-  };
-
   try {
+    const [cred] = await db
+      .select()
+      .from(credentials)
+      .where(eq(credentials.userId, run.userId))
+      .limit(1);
+
+    // Decrypted credentials live ONLY as locals here — never logged, never on req.
+    const username = cred ? decryptOptional(cred.sproutUsernameEnc) : null;
+    const password = cred ? decryptOptional(cred.sproutPasswordEnc) : null;
+    if (!username || !password) {
+      // Worth notifying about precisely because the user won't otherwise
+      // discover their config is broken until payday.
+      await finalizeRun(run, {
+        status: "failure",
+        error: "No Sprout credentials available for this run",
+      });
+      return;
+    }
+
+    const gmailEmail = cred ? decryptOptional(cred.gmailEmailEnc) : null;
+    const gmailAppPassword = cred ? decryptOptional(cred.gmailAppPasswordEnc) : null;
+    const imapAvailable = !!(gmailEmail && gmailAppPassword);
+
+    await db.update(runs).set({ status: "running" }).where(eq(runs.id, runId));
+    logger.info({ runId, action: run.action }, "run started");
+
+    const log = (message: string): void => {
+      // Mirror each step to the backend logger AND persist it to runs.steps so
+      // run progress is visible in the server logs, not only in the UI.
+      logger.info({ runId }, message);
+      void appendRunStep(runId, message);
+    };
+
+    // OTP acquisition races the manual bridge against IMAP polling; first wins,
+    // and the loser is stopped in the finally.
+    const waitForOtpCode = (): Promise<string> => {
+      const manual = waitForOtp(runId);
+      if (imapAvailable && gmailEmail && gmailAppPassword) {
+        const imap = pollForOtp(
+          { email: gmailEmail, appPassword: gmailAppPassword },
+          { signal: otpAbort.signal },
+        );
+        return Promise.any([manual, imap]).finally(() => {
+          otpAbort.abort();
+          cancelWait(runId);
+        });
+      }
+      return manual;
+    };
+
     const result = await runAutomation({
       userId: run.userId,
       runId,
