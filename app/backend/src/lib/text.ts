@@ -11,6 +11,21 @@ export function stripAnsi(text: string): string {
   return text.replace(ANSI_SGR, "");
 }
 
+/**
+ * Reduce an unknown thrown value to a one-line message. An AggregateError
+ * (what Promise.any rejects with when every candidate rejects) is unwrapped so
+ * the persisted `runs.error` records every underlying cause instead of the
+ * opaque literal "All promises were rejected" that its `.message` always is.
+ */
+export function errorSummary(err: unknown): string {
+  if (err instanceof AggregateError && err.errors.length > 0) {
+    return err.errors
+      .map((cause) => (cause instanceof Error ? cause.message : String(cause)))
+      .join("; ");
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
 const NOTIFICATION_TEXT_LIMIT = 300;
 
 /** Clip long run-derived text for phone-readable notifications. The full text

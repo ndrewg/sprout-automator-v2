@@ -255,6 +255,7 @@ export type SweepDeps = {
     userId: string,
     action: ClockAction,
     dateStr: string,
+    now: Date,
   ) => Promise<boolean>;
   // "claimed" = this sweep inserted the notice row and owns the send.
   // "retry"  = the row already exists but was never notified (send failed or
@@ -279,10 +280,12 @@ export const defaultSweepDeps: SweepDeps = {
     !isWeekend(manilaDateString(date)) && !isPhilippineHoliday(date),
   loadEnabledSchedules: async () =>
     db.select().from(schedules).where(eq(schedules.enabled, true)),
-  hasRunToday: async (userId, action, dateStr) => {
+  hasRunToday: async (userId, action, dateStr, now) => {
     // Fetch the user's runs since now - 24h and filter in JS with
-    // manilaDateString — avoids timezone arithmetic in SQL.
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    // manilaDateString — avoids timezone arithmetic in SQL. The window is
+    // anchored to the sweep's clock (now), not the wall clock: a sweep test
+    // pins `now` to a fixed instant and the run lookup must agree with it.
+    const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const rows = await db
       .select()
       .from(runs)
@@ -369,7 +372,7 @@ export async function sweepMissedRuns(
         // Grace window absorbs queue wait and a slow HRHub.
         if (now.getTime() < expected.getTime() + graceMs) continue;
 
-        const hasRun = await deps.hasRunToday(row.userId, action, todayStr);
+        const hasRun = await deps.hasRunToday(row.userId, action, todayStr, now);
         if (hasRun) continue;
 
         const claim = await deps.tryInsertMissedNotice(

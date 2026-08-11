@@ -79,6 +79,13 @@ Phase 6 landed the transport, the settings row and the routes, so the channel ex
 
 `04-STACK-SCAFFOLD-AND-CONFIG.md` still names Vite 6 / TS 5.6 as targets; as-built is Vite 8 / TS 6. A note was added at the top of that file, but the dependency block below it still reads as though 6 were the target.
 
+## 11. OTP-fix test debt: a non-discriminating test and an unredacted error path
+
+**Low priority — test-quality debt found in the OTP-retry review (2026-08-11), not a shipping defect.** Don't let either slip into a later refactor:
+
+1. `app/backend/test/services/otp-acquisition.test.ts:73` ("stops only the winning attempt's poller") **does not discriminate** — it passes against the reintroduced run-scoped-controller bug because the mock `pollForOtp` ignores the signal. Only the first test (`:42-71`) protects the fresh-controller property; a future edit deleting that first test would silently lose the coverage. Make the second test assert on the captured signal (snapshotted at call time), or delete it so a removal is loud.
+2. `errorSummary` (`lib/text.ts`) is a **pure passthrough**: if any error cause ever carried a secret, it would land verbatim in `runs.error` and the Telegram failure message (`renderRunFinishedMessage` embeds it). No *current* source can produce such a cause (no `src` error interpolates a credential; imapflow 1.4.2 redacts creds), and the new rule-4 integration assertion (`otp-error-unwrap.test.ts:143-146`) is vacuous by construction — benign fixed-string causes. **Fix:** route `errorSummary` output through a string-redaction step mirroring the key list `lib/logger.ts` already maintains (`password`, `appPassword`, `gmailAppPassword`, `code`, `otp`, `botToken`, …) before the message is persisted or notified, plus a unit test injecting a secret-bearing cause — that test fails today, so the redaction ships with it.
+
 ---
 
 ## Closed

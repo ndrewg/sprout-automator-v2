@@ -14,6 +14,16 @@ export type ImapTestResult =
   | { ok: true; messageCount: number }
   | { ok: false; error: string };
 
+export type PollForOtpOptions = {
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+  lookbackSeconds?: number;
+  signal?: AbortSignal;
+  /** Codes already submitted during this run — skip them so a retry cannot
+   *  re-acquire the same stale email. */
+  excludeCodes?: ReadonlySet<string>;
+};
+
 const IMAP_HOST = "imap.gmail.com";
 const IMAP_PORT = 993;
 
@@ -64,6 +74,7 @@ export async function testImapConnection(
 export async function fetchLatestOtp(
   creds: ImapCreds,
   lookbackSeconds = 300,
+  excludeCodes?: ReadonlySet<string>,
 ): Promise<ImapFetchResult> {
   const client = makeClient(creds);
   try {
@@ -95,7 +106,7 @@ export async function fetchLatestOtp(
           (parsed.html || "").replace(/<[^>]+>/g, " "),
         ].join("\n");
         const code = extractOtpCode(haystack);
-        if (code) {
+        if (code && !excludeCodes?.has(code)) {
           return {
             ok: true,
             code,
@@ -123,12 +134,7 @@ export async function fetchLatestOtp(
  */
 export async function pollForOtp(
   creds: ImapCreds,
-  options: {
-    timeoutMs?: number;
-    pollIntervalMs?: number;
-    lookbackSeconds?: number;
-    signal?: AbortSignal;
-  } = {},
+  options: PollForOtpOptions = {},
 ): Promise<string> {
   const timeoutMs = options.timeoutMs ?? 5 * 60 * 1000;
   const pollIntervalMs = options.pollIntervalMs ?? 5000;
@@ -139,7 +145,11 @@ export async function pollForOtp(
     if (options.signal?.aborted) {
       throw new Error("IMAP polling aborted");
     }
-    const result = await fetchLatestOtp(creds, lookbackSeconds);
+    const result = await fetchLatestOtp(
+      creds,
+      lookbackSeconds,
+      options.excludeCodes,
+    );
     if (result.ok) return result.code;
     await sleep(pollIntervalMs);
   }

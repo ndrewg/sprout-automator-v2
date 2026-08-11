@@ -326,6 +326,8 @@ function sleep(ms: number): Promise<void> {
 
 **Rules:** don't widen the regex (`\d{4,6}`, prefer 5 — wider matches timestamps/totals). MIME parsing via `mailparser` is mandatory (raw `msg.source` hides the digits in base64/HTML). All user-facing IMAP errors go through `humanizeImapError`.
 
+> ⚠️ **As-built (found 2026-08):** the OTP-bugfix session added a per-run code-exclusion option to the IMAP path. `pollForOtp`'s options gained `excludeCodes?: ReadonlySet<string>` (extracted as the exported `PollForOtpOptions` type), and `fetchLatestOtp` gained a third parameter `excludeCodes?: ReadonlySet<string>`; a code already in the set is skipped in favour of the next distinct email, or reported as `no_code` if every candidate is excluded. This is how a retry avoids re-acquiring the same stale email. The extraction regex is unchanged. The OTP acquisition orchestration itself moved out of `services/runs.ts` into `src/services/otp-acquisition.ts` (`createOtpAcquirer`), which races the manual bridge against `pollForOtp` per attempt with a fresh `AbortController` each time and passes the growing `submittedCodes` set through as `excludeCodes`.
+
 ⚑ RECOMMENDED test (`vitest`) for `extractOtpCode`: `"Your code is 48213"` → `"48213"`; prefers the 5-digit over a 4-digit elsewhere in the text; `"Order #1234567 total 9999"` (no isolated 4–6 run that's the code) behaves as specified; HTML with digits split across spans matches after tag-stripping.
 
 ---

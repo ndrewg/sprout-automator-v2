@@ -9,10 +9,9 @@ import {
   cancelWait,
   isWaitingForOtp,
   submitOtp,
-  waitForOtp,
 } from "../automation/otp-bridge";
-import { pollForOtp } from "../lib/imap-otp";
-import { stripAnsi } from "../lib/text";
+import { createOtpAcquirer } from "./otp-acquisition";
+import { errorSummary, stripAnsi } from "../lib/text";
 import { notifyRunFinished } from "./notifications";
 import type { ClockAction } from "../automation/clock";
 
@@ -113,7 +112,6 @@ export async function executeQueuedRun(runId: string): Promise<void> {
   // failure path and reaches finalizeRun. A rejection that escapes this
   // function would otherwise bypass finalizeRun entirely and kill the process
   // (backlog #2: decrypt used to sit outside this try).
-  const otpAbort = new AbortController();
   try {
     const [cred] = await db
       .select()
@@ -149,21 +147,17 @@ export async function executeQueuedRun(runId: string): Promise<void> {
     };
 
     // OTP acquisition races the manual bridge against IMAP polling; first wins,
-    // and the loser is stopped in the finally.
-    const waitForOtpCode = (): Promise<string> => {
-      const manual = waitForOtp(runId);
-      if (imapAvailable && gmailEmail && gmailAppPassword) {
-        const imap = pollForOtp(
-          { email: gmailEmail, appPassword: gmailAppPassword },
-          { signal: otpAbort.signal },
-        );
-        return Promise.any([manual, imap]).finally(() => {
-          otpAbort.abort();
-          cancelWait(runId);
-        });
-      }
-      return manual;
-    };
+    // and the loser is stopped in the acquirer's own finally. Each call gets a
+    // fresh AbortController so a retry (runAutomation calls waitForOtpCode
+    // again when the first code is rejected by HRHub) races a LIVE poller, and
+    // the acquirer remembers every code handed out so a stale email's code is
+    // never re-acquired (defect 1 + defect 2).
+    const { waitForOtpCode } = createOtpAcquirer(
+      runId,
+      imapAvailable && gmailEmail && gmailAppPassword
+        ? { email: gmailEmail, appPassword: gmailAppPassword }
+        : null,
+    );
 
     const result = await runAutomation({
       userId: run.userId,
@@ -186,7 +180,7 @@ export async function executeQueuedRun(runId: string): Promise<void> {
     });
   } catch (err: unknown) {
     cancelWait(runId);
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorSummary(err);
     logger.error({ runId, err }, "run execution failed");
     await finalizeRun(run, { status: "failure", error: message });
   }
