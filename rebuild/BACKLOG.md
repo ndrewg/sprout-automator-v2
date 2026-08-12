@@ -8,7 +8,11 @@ Everything known-missing that isn't already a phase file, ordered by *when it wi
 
 ---
 
-## 1. Delete `_archive/`
+> **Updated 2026-08-11 (2).** §§ 2, 3, 4, 5 and 8 are now specced as executable gates in [`phases/phase-8-rollout-readiness.md`](./phases/phase-8-rollout-readiness.md) — work them from there, not from these summaries. Item numbers below are **stable**; phase 8 cites them, so do not renumber.
+
+## 1. Delete `_archive/` — ✅ DONE (verified absent 2026-08-11)
+
+**Deleted.** Confirmed gone from the working tree; `.gitignore:31` still carries the entry so it cannot come back accidentally. Left here rather than moved to "Closed" so the numbering phase 8 cites stays stable. Original rationale below.
 
 **Ten seconds, and it is the only standing liability in the tree.** It holds a real `.env` and Sprout session cookies; `reference/supply-chain-and-ci.md` cites it as the near-miss that motivated the gitleaks hook. Gitignored, so this is about the working copy and any backup of it, not the repository.
 

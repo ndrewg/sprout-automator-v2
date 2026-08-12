@@ -81,7 +81,8 @@ Read the foundation docs in order once, then work the phases.
 - [`phases/phase-5-deploy-ops.md`](./phases/phase-5-deploy-ops.md) — pending
 - [`phases/phase-T-test-harness.md`](./phases/phase-T-test-harness.md) — **next**: integration + e2e harness. Runs before 6; gates everything after it
 - [`phases/phase-6-notifications.md`](./phases/phase-6-notifications.md) — Telegram run notifications + missed-run reconciliation
-- [`phases/phase-7-schedule-pause.md`](./phases/phase-7-schedule-pause.md) — pause / leave days
+- [`phases/phase-7-schedule-pause.md`](./phases/phase-7-schedule-pause.md) — pause / leave days ✅
+- [`phases/phase-8-rollout-readiness.md`](./phases/phase-8-rollout-readiness.md) — **next**: the five things that stop this being safe for ~30 users. Gated 8A–8E, **order is load-bearing** (8A first — later gates add config keys that must reach the container)
 
 **Reference (attach to a phase when it says so; reproduce these verbatim):**
 - [`reference/testing-strategy.md`](./reference/testing-strategy.md) — **executable gates; attach to every phase from 6 onward**
