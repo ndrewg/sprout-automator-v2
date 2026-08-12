@@ -174,3 +174,98 @@ This is unchanged by the round-2 fix, which is why I do not block the commit on 
 | 3 | Clean boot, no validation warnings | `docker compose logs backend --tail 5` after restart → boots clean; no config-validation errors, no rate-limit/trust-proxy validation warnings (`ERR_ERL_*`, "trust proxy") | |
 | 4 | (B1 live demo, superseded by the fix) | Fire 40 signups each with a fresh `curl -H "CF-Connecting-IP: 203.0.113.<N>"` → the **31st is now 429** (header ignored, all 40 share the real client's bucket). 0×429 would mean the trusted-peer gate is not active | |
 | 5 | (B1 poisoning live demo, superseded by the fix) | 30 requests with `CF-Connecting-IP: <any-value>`, then one real login without the header → the real login's outcome is **unchanged** by the 30 forged requests (they exhausted the requester's own bucket, not the header value's) | |
+
+---
+
+## Round 3 (2026-08-12) — tester
+
+I tried to make every round-3 claim false: gates re-run from the implementer's uncommitted working tree, the rate-limiter thresholds re-proven **live against the real container**, the required-secret boot guard proven end-to-end, the CF-Connecting-IP gate attacked in both directions over real HTTP, every new test deliberately broken, and a genuinely clean `--no-cache` build checked for the corepack prompt. **No BLOCKING findings.** One coverage gap worth a reviewer's eye (B7). The `[manual]` rate-limit rows are now provable and are marked done with real output.
+
+### A. Structural verification this round
+
+**Gates re-run:**
+- `pnpm lint && pnpm typecheck && pnpm test` → oxlint clean, `tsc --noEmit` clean, **16 files / 132 tests** unit passed.
+- `pnpm test:integration` → **19 files / 101 tests** passed (Postgres up via `docker compose up -d postgres`).
+- `docker compose config` and `docker compose -f docker-compose.yml -f docker-compose.prod.yml config` → both exit 0, **0× "is not set"** in either. Base renders `APP_ENCRYPTION_KEY`/`SESSION_SECRET` with real values from `.env`, all optional keys as `""`. Prod keeps `NODE_ENV=production`, `APP_URL: https://sprout.yourdomain.com`, numeric dials empty, `ports: !reset []` intact.
+- `git ls-files jar` → nothing; `git add -n .` stages exactly the 13 round-3 files and nothing else (no `.cortexkit/`, `.env`, `data/`, `jar`).
+- **No new dependencies, no migration:** `git diff --stat` on all four `package.json`/lockfiles → empty; `app/backend/drizzle/` untouched (0000–0004 only, `git status --short` empty there).
+
+**Compose contract (item 1):**
+- `docker-compose.yml:44-45` — `APP_ENCRYPTION_KEY` and `SESSION_SECRET` stay **bare `${KEY}`** (verified by reading; `DATABASE_URL` at :43 is composed inline from POSTGRES_* with pre-existing defaults, not a round-3 change). The comment at :48-56 names the bare-vs-`:-` distinction correctly.
+- `docker-compose.yml:57-65` and `docker-compose.prod.yml:55-61` — every optional key is `${KEY:-}` (empty default) including the new `TRUSTED_CLOUDFLARE_PEERS`. No `${KEY:-<realdefault>}` form **introduced** by round 3; the pre-existing ones (`SPROUT_URL:-`, `NODE_ENV:-`, `TZ:-`, `BACKEND_PORT:-`, prod `APP_URL:-`) are unchanged from round 1 (B3), values still agree with config.ts.
+
+**Boot-guard end-to-end (item 3):** commented out `APP_ENCRYPTION_KEY` in `.env`, `docker compose up -d --force-recreate backend` → the compose warning fires ("The \"APP_ENCRYPTION_KEY\" variable is not set. Defaulting to a blank string.") and the container **crash-loops** with `Error: Invalid environment configuration: - APP_ENCRYPTION_KEY: APP_ENCRYPTION_KEY must be a 32-byte hex string (64 chars)` (config.ts:96). Restored `.env` (hash-identical to backup), recreated → boots clean. The bare-`${KEY}` warning + empty→Zod-rejection path is intact; nothing silently defaults.
+
+**`.env.example` ↔ config.ts ↔ compose cross-check:** config.ts has 16 keys now (adds `TRUSTED_CLOUDFLARE_PEERS`). All 16 appear in `.env.example` (commented or not) and all 16 reach the container environment (`docker compose config` backend.environment). `PORT`/`DATABASE_URL`/`DATA_DIR` are set literally in compose (:42-46), not interpolated — pre-existing and correct. No key in one and absent from another.
+
+**`.cortexkit/`:** gitignored (`.gitignore:32`), untracked, absent from `e3f0878` and from `git add -n` output. Claim holds.
+
+**Diff characterisation (item 2, the +72 lines in security.ts):** read the full diff — they are the `parseTrustedCloudflarePeers` function (12 lines), the two config-driven wiring lines (`security.ts:34-36` and `:75-77`), and ~50 lines of doc comments. `clientIp`'s gate logic (`:119-129`), the limiters (`:176-196`), `normalizePeer` (`:90-92`) and `setTrustedCloudflarePeers` (`:84-86`) are **unchanged**. The limits (`AUTH_RATE_LIMIT` default 30, per-IP 120/min apiLimiter) and keying are byte-identical to round 2. **Not a behavioural rewrite** — confirmed behaviourally by the live thresholds below.
+
+### B. Findings
+
+#### B7. Non-blocking — the round-3 headline wiring has NO automated test; only the parse and the seam are pinned
+
+The whole point of round 3 was to make the trusted-peer set operator-configurable via `TRUSTED_CLOUDFLARE_PEERS`. That path is two lines: module-load (`security.ts:75-77`) and `resetRateLimits` (`:34-36`), both `parseTrustedCloudflarePeers(config.TRUSTED_CLOUDFLARE_PEERS)`. I deliberately broke **both halves separately** and the suite stayed fully green:
+
+| Probe | Tamper | Result |
+|---|---|---|
+| W1 | module-load line → `new Set()` (ignores config) | **132/132 unit + 101/101 integration pass** — the wiring is unpinned |
+| W2 | `resetRateLimits` → `new Set()` (round-2 behaviour) | **101/101 integration pass** — same |
+
+No test anywhere sets `TRUSTED_CLOUDFLARE_PEERS` to a *value* and exercises `clientIp`; the only references are the unset-default assertion (`config-defaults.test.ts:55-58`) and the parse unit tests. Failure scenario: a future refactor deletes or mis-splices either wiring line and the suite stays green while a deployed team silently shares one auth bucket — the exact failure § 8C exists to prevent, now unguarded. It works **today** (proven live in A-direction below), so not blocking; but this is the one place where round 3's own feature is trusted-by-intent, not trusted-by-test. Suggest the reviewer note it for a later hardening pass (e.g. a unit test that sets the env var before importing security, or a config-injection seam).
+
+**Test-discrimination probes — every new round-3 test was broken and went red (then restored, then green):**
+
+| Probe | Tamper | Result |
+|---|---|---|
+| G1 | `parseTrustedCloudflarePeers` → always `new Set()` | split-list test fails (`expected Set{} to equal Set{...}`) — **discriminates** |
+| G2 | parse keeps empty entries (`peers.add(part.trim())`) | both Compose-empty-form tests fail (`expected Set{''} to equal Set{}`) — **discriminates** |
+| G3 | `emptyToUndefined` → identity in config.ts | all 4 new empty-string→default tests fail (loadConfig throws) — **discriminates** |
+| G4 | gate forced off in `clientIp` (`if (false)`) | trusted-peer integration test fails (`expected 429 to be 403`) — **discriminates** |
+
+After every restore, source files were hash-identical to the pre-probe state and the full gate re-ran green (132 + 101).
+
+**Live threshold re-proof (item 2, against the real container, `.env` AUTH_RATE_LIMIT=15 then unset, `--force-recreate` between runs to clear the in-memory store):**
+- `AUTH_RATE_LIMIT=15` → statuses `401 ×15, 429` — **the 16th is 429**. ✓
+- unset → `401 ×30, 429` (exactly one 429, at position 31) — **the 31st is 429**. ✓
+- `docker compose logs backend` after both boots: no `ERR_ERL_*`, no "trust proxy", no config-validation errors. ✓
+
+**CF-Connecting-IP gate — both directions over real HTTP (item 4):**
+
+| Scenario | Config | Probe | Result |
+|---|---|---|---|
+| Gate off (default) | `TRUSTED_CLOUDFLARE_PEERS` unset | 40 logins, each `CF-Connecting-IP: 203.0.113.<N>` | 30×401 + 10×429, **first 429 at 31** — one shared bucket. Safe default intact. |
+| Gate on, trusted peer | `TRUSTED_CLOUDFLARE_PEERS=172.21.0.1` (the Docker bridge gateway the host's curl comes through), recreated | same 40 logins | **40×401, 0×429** — distinct valid values now get distinct buckets. The opt-in changes behaviour, so § 8C's purpose is met. |
+| Gate on, trusted peer, malformed | same | cycle `[no header, not-an-ip, over-long, header-twice]` ×8 from the host | 30×401 + 429s, **first 429 at 31** — malformed values fall back to req.ip and share one bucket. |
+| Gate on, UNtrusted peer | same, but curl from **inside** the container (socket peer 127.0.0.1, not in the set) | 40 logins each with distinct **valid** `CF-Connecting-IP: 203.0.113.<N>` | 30×401 + 429s, **first 429 at 31** — a valid literal from a non-trusted peer is still ignored (fail-closed even with the gate on). |
+| Gate on, UNtrusted peer, all forms | same, inside container | cycle `[no-header, not-an-ip, 1.2.3.4, 5.6.7.8, over-long, IPv6, header-twice]` ×8 | first 429 at 31 — nothing from a non-trusted peer is keyed on, valid or not. |
+
+The brief's item-4 malformed list includes `1.2.3.4`, `5.6.7.8` and IPv6 alongside the genuinely malformed forms. Those are valid literals, so the "none may be keyed on" claim is only true for the **untrusted-peer** variant (proven above); from a **trusted** peer they are correctly keyed on (that is the point of the feature, proven in row 2). Both readings hold; the doc comment (`security.ts:94-118`) states exactly this trust condition, and `DEPLOY.md:162-186` (§4.1) tells the operator what to set, how to find the peer, what forgetting costs (one shared bucket), and the Caddy caveat. ✓
+
+**Corepack (item 5):**
+- `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` is set **in both Dockerfile stages before any pnpm invocation**: `Dockerfile:9` (frontend stage, before `corepack enable pnpm` at :10 and `pnpm install` at :12) and `Dockerfile:21` (runtime stage, before `corepack enable pnpm` at :22 and `pnpm install` at :24). Not just the final stage.
+- `setup.ps1:29` and `setup.sh:21` both export it before any docker/pnpm command.
+- **Genuinely clean build** `docker compose build --no-cache backend`: **0× "Corepack is about to download"** in the full log; both stages re-ran `corepack enable pnpm` + `pnpm install` from scratch (frontend resolved 426 packages, runtime 161) and the frontend `pnpm build` completed. The env is effective under a genuinely cold build, not a cached-image artifact. ✓
+
+**STATE.md ledger claims (item 6):** every round-3 claim in the phase-8 row and the B5 gap note is true right now: `${KEY:-}` switch, bare secrets, empty-string→default unit pins, the operator-facing `TRUSTED_CLOUDFLARE_PEERS` key wired through all three files, DEPLOY.md §4.1, both-stages corepack, and the live re-verification numbers (I reproduced 16th-429 / 31st-429 / 0 warnings / no prompt / `git ls-files jar` empty / drizzle untouched). The row's earlier `(124 unit, 101 integration)` figure is the round-1/2 record and is now superseded (132 unit) — the ledger row was not renumbered, which is fine for an as-built record but worth knowing.
+
+### C. What I could not verify
+
+- **A cold corepack cache on a fresh machine.** The `--no-cache` build re-runs every RUN step in a fresh container, which is the strongest local signal, but this host's pnpm was already downloaded inside earlier image layers and the OS-level corepack cache; the true "first build on a clean machine" case needs a fresh node:22 image and is the residual `[manual]` item.
+- **Behaviour behind a real Cloudflare Tunnel** — the trusted-peer path was exercised with the Docker bridge gateway as the trusted peer; a genuine cloudflared→Express hop (and the header Cloudflare itself stamps) is only provable on a real tunnel.
+- **`pnpm build` and the e2e suite** — not part of the phase gate; not run.
+- **Long-window (15 min) bucket expiry** — express-rate-limit store semantics, unchanged, not re-probed.
+- **The header-sent-twice array shape at the app level** — the malformed cycle included it; Node coalesces to an array and `clientIp` reads `raw[0]`. The round-1/2 array-form coverage (A2) still stands.
+
+### D. `[manual]` checks — for the human, rate-limit rows now proven by the tester
+
+| # | Check | Command / what a pass looks like | Result |
+|---|---|---|---|
+| 1 | Value crosses the container boundary (raise budget) | `AUTH_RATE_LIMIT=15` in `.env`, recreate, 16 wrong-password logins | ✅ **DONE (tester, 2026-08-12): `401 ×15, 429`** |
+| 2 | New default is live | unset, recreate, 31 wrong-password logins | ✅ **DONE (tester, 2026-08-12): `401 ×30, 429`** |
+| 3 | Clean boot, no validation warnings | `docker compose logs backend` after both boots | ✅ **DONE (tester, 2026-08-12): no ERR_ERL_*/trust-proxy/config errors** |
+| 4 | Gate off: 40 forged headers share the real client's bucket | `CF-Connecting-IP: 203.0.113.<N>` ×40 → 31st is 429 | ✅ **DONE (tester, 2026-08-12): first 429 at 31** |
+| 5 | Gate on: 40 distinct forged headers get distinct buckets | set `TRUSTED_CLOUDFLARE_PEERS` to the gateway, recreate, same probe → 0×429 | ✅ **DONE (tester, 2026-08-12): 40×401, 0×429** |
+| 6 | **Real Cloudflare Tunnel → real per-client IPs reach the limiter** | put a tunnel in front, confirm distinct visitors get distinct auth buckets (and that a forged `CF-Connecting-IP` from a direct connection still cannot) | 🕐 human — the reason § 8C exists; untestable locally |
+

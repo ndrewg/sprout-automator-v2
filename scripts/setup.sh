@@ -16,6 +16,10 @@ set -euo pipefail
 # resolves from the repo root.
 cd "$(dirname "$0")/.."
 
+# Unattended: without this, corepack asks "Corepack is about to download pnpm…"
+# and blocks on first run (the compose build does the same — both need it).
+export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+
 # --- 1. Prerequisites ----------------------------------------------------------
 
 if ! command -v docker >/dev/null 2>&1; then

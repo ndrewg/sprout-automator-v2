@@ -17,7 +17,7 @@ const notificationsTestLimiterStore = new MemoryStore();
 
 /**
  * Clears every in-memory rate-limit store and restores the trusted-peer set to
- * its empty default. Called by the integration harness's per-test reset
+ * its configured default. Called by the integration harness's per-test reset
  * alongside resetDatabase(): authLimiter is config.AUTH_RATE_LIMIT /15min per
  * client and the integration project runs single-fork, so a suite that
  * legitimately issues more auth requests than the budget (e.g. password-reset)
@@ -31,25 +31,50 @@ export async function resetRateLimits(): Promise<void> {
   await authLimiterStore.resetAll();
   await apiLimiterStore.resetAll();
   await notificationsTestLimiterStore.resetAll();
-  trustedCloudflarePeers = new Set();
+  trustedCloudflarePeers = parseTrustedCloudflarePeers(
+    config.TRUSTED_CLOUDFLARE_PEERS,
+  );
 }
 
 /**
- * The socket peer addresses from which a CF-Connecting-IP header is accepted.
+ * Parses the TRUSTED_CLOUDFLARE_PEERS env list ("a, b, c") into a peer set,
+ * dropping empty entries. Unset or empty → the empty set, which is the gate
+ * being OFF: CF-Connecting-IP is then never honoured and every request keys on
+ * req.ip. Exported only so the unit tests can pin the parse (the empty-string
+ * Compose form must behave exactly like an unset variable).
+ */
+export function parseTrustedCloudflarePeers(
+  raw: string | undefined,
+): ReadonlySet<string> {
+  if (raw === undefined) return new Set();
+  const peers = new Set<string>();
+  for (const part of raw.split(",")) {
+    const peer = part.trim();
+    if (peer !== "") peers.add(peer);
+  }
+  return peers;
+}
+
+/**
+ * The socket peer addresses from which a CF-Connecting-IP header is accepted,
+ * derived from the TRUSTED_CLOUDFLARE_PEERS config key (comma-separated).
  * A real Cloudflare Tunnel (client → CF edge → cloudflared → Express) is the
  * ONLY channel on which that header is set by Cloudflare itself, so it is only
  * honoured when the request's immediate peer (req.socket.remoteAddress) is one
  * of these. NO Cloudflare Tunnel exists in any deployment today, so this set is
  * EMPTY and the header is never honoured: every request keys on req.ip (driven
- * by TRUST_PROXY_HOPS). When a real tunnel is deployed, add the address the
- * backend sees from cloudflared here — nothing else.
+ * by TRUST_PROXY_HOPS). When a real tunnel is deployed, set
+ * TRUSTED_CLOUDFLARE_PEERS to the address the backend sees from cloudflared —
+ * nothing else.
  *
  * Caddy is deliberately NOT a trusted peer: it forwards a client-supplied
  * CF-Connecting-IP verbatim (verified end-to-end), so listing its container
  * address would re-open the spoofing hole this gate closes. Only a peer that
  * genuinely terminates a Cloudflare tunnel may be added.
  */
-let trustedCloudflarePeers: ReadonlySet<string> = new Set();
+let trustedCloudflarePeers: ReadonlySet<string> = parseTrustedCloudflarePeers(
+  config.TRUSTED_CLOUDFLARE_PEERS,
+);
 
 /**
  * Test seam (mirrors resetRateLimits): replace the trusted-peer set so the
@@ -67,20 +92,29 @@ function normalizePeer(peer: string | undefined): string | undefined {
 }
 
 /**
- * The real client address for rate-limit keying. CF-Connecting-IP is honoured
- * ONLY when the request actually arrived from a trusted Cloudflare channel —
- * the socket peer is in trustedCloudflarePeers — AND the value is a
- * syntactically valid IPv4/IPv6 literal. Every other request keys on Express's
- * req.ip (driven by TRUST_PROXY_HOPS).
+ * The real client address for rate-limit keying.
  *
- * Parsing as an IP literal is a validity check, not a trust check: Caddy
- * forwards whatever header a client sent verbatim, so on today's channels a
- * well-formed CF-Connecting-IP is still attacker-controlled — it would let an
- * attacker rotate the header to evade the per-IP budget or claim a victim's
- * address to fill their bucket. The peer gate is what makes the value
- * trustworthy; the literal check only keeps one malformed value from merging
- * every client into a single bucket. (Node's isIP returns 4 or 6 for a valid
- * literal and 0 otherwise.)
+ * CF-Connecting-IP is trusted — and used as the key — ONLY when BOTH hold:
+ *  1. the request's immediate socket peer (req.socket.remoteAddress) is in the
+ *     trusted-peer set, AND
+ *  2. the header value is a syntactically valid IPv4/IPv6 literal.
+ * Every other request keys on Express's req.ip (driven by TRUST_PROXY_HOPS).
+ *
+ * What an operator must set to enable the trusted-tunnel path: put the address
+ * the backend sees from cloudflared into TRUSTED_CLOUDFLARE_PEERS (comma-
+ * separated) in .env — the same key is passed through by both compose files.
+ * That is the ONLY step; while the key is unset or empty the set is empty, the
+ * header is NEVER honoured, and the limiter falls back to req.ip. The gate is
+ * off by default because no deployment runs a Cloudflare Tunnel today.
+ *
+ * Why the peer gate exists: parsing as an IP literal is a validity check, not
+ * a trust check. Caddy forwards whatever header a client sent verbatim, so on
+ * today's channels a well-formed CF-Connecting-IP is still attacker-controlled
+ * — trusting it would let an attacker rotate the header to evade the per-IP
+ * budget or claim a victim's address to fill their bucket. The peer gate is
+ * what makes the value trustworthy; the literal check only keeps one malformed
+ * value from merging every client into a single bucket. (Node's isIP returns
+ * 4 or 6 for a valid literal and 0 otherwise.)
  */
 export function clientIp(req: Request): string {
   const peer = normalizePeer(req.socket.remoteAddress);

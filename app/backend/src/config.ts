@@ -73,6 +73,16 @@ const envSchema = z.object({
   // at a predictable X-Forwarded-For position there.
   TRUST_PROXY_HOPS: z
     .preprocess(emptyToUndefined, z.coerce.number().int().min(0).default(1)),
+  // Comma-separated socket peer addresses from which a CF-Connecting-IP header
+  // is accepted as the real client address (see middleware/security.ts —
+  // clientIp). EMPTY by default and OPT-IN only: no deployment runs a
+  // Cloudflare Tunnel today, so the rate limiters key on req.ip and a
+  // client-supplied header is ignored no matter how well-formed it is. When a
+  // real tunnel is put in front (BACKLOG.md § 12), set this to the address the
+  // backend sees from cloudflared — nothing else. Caddy's address must never be
+  // listed: it forwards a client-supplied header verbatim.
+  TRUSTED_CLOUDFLARE_PEERS: z
+    .preprocess(emptyToUndefined, z.string().optional()),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Request } from "express";
 import {
   clientIp,
+  parseTrustedCloudflarePeers,
   setTrustedCloudflarePeers,
 } from "../../src/middleware/security";
 
@@ -105,5 +106,30 @@ describe("clientIp", () => {
     setTrustedCloudflarePeers(new Set(["127.0.0.1"]));
     const req = mockReq({ "cf-connecting-ip": "198.51.100.7" }, "127.0.0.1", undefined);
     expect(clientIp(req)).toBe("127.0.0.1");
+  });
+});
+
+// The trusted-peer set is populated from the TRUSTED_CLOUDFLARE_PEERS config
+// key at module load, so this parse is the operator-facing opt-in path (the
+// integration suite proves the budget consequences both ways). These assertions
+// pin the parse, including that the empty string Compose emits for an unset key
+// behaves exactly like an unset variable — both are the gate OFF.
+describe("parseTrustedCloudflarePeers", () => {
+  it("splits a comma-separated list, trimming whitespace and dropping empty entries", () => {
+    expect(parseTrustedCloudflarePeers("127.0.0.1, 10.0.0.5, ::1")).toEqual(
+      new Set(["127.0.0.1", "10.0.0.5", "::1"]),
+    );
+  });
+
+  it("an unset key is the empty set — the gate is OFF", () => {
+    expect(parseTrustedCloudflarePeers(undefined)).toEqual(new Set());
+  });
+
+  it("an empty string (Compose form of an unset key) is also the empty set", () => {
+    expect(parseTrustedCloudflarePeers("")).toEqual(new Set());
+  });
+
+  it("a list of only separators is the empty set", () => {
+    expect(parseTrustedCloudflarePeers(" , ")).toEqual(new Set());
   });
 });

@@ -159,6 +159,31 @@ MAX_CONCURRENT_RUNS=3
 variables left unset are passed as empty strings, which `config.ts` treats
 correctly (empty `SIGNUP_ALLOWED` in production = refuse to boot).
 
+### 4.1 Rate limiting behind a Cloudflare Tunnel (opt-in) — **`[manual]` on a real tunnel**
+
+The rate limiters key on `CF-Connecting-IP` **only when the request arrived
+from a trusted Cloudflare peer**, so the header is ignored today (safe
+default: a spoofable header can't split the budget — no evasion or poisoning).
+Once a Cloudflare Tunnel is in front (`BACKLOG.md` § 12 — client → CF edge →
+`cloudflared` → Express), the header is Cloudflare's and the limiter should use
+it, or **every user on the tunnel shares one auth bucket** and the first
+morning's password fumbling locks the whole team out.
+
+**To enable it** (nothing else — the peer gate replaces `TRUST_PROXY_HOPS`-style
+guessing):
+
+```ini
+TRUSTED_CLOUDFLARE_PEERS=<address the backend sees from cloudflared>
+```
+
+Find that address from inside the network, e.g.
+`docker inspect <cloudflared-container> --format '{{.NetworkSettings.Networks.sprout-net.IPAddress}}'`
+(or the host IP if the connector runs outside compose). **Do not** list Caddy's
+address — Caddy forwards a client-supplied `CF-Connecting-IP` verbatim, so
+trusting it re-opens the spoofing hole. Leaving the key empty is correct until
+a tunnel exists: the limiter falls back to `req.ip`, which behind the
+base-compose direct exposure is the real client already.
+
 ---
 
 ## 5. Caddyfile — the two modes

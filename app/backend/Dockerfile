@@ -3,6 +3,10 @@
 # lightningcss) has musl/alpine friction — glibc avoids it.
 FROM node:22-bookworm-slim AS frontend
 WORKDIR /fe
+# Unattended build: without this, corepack asks "Corepack is about to download
+# pnpm…" on the first pnpm invocation and blocks waiting for input — which on
+# the unattended 05:30 rebuild host means a missed run.
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable pnpm
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
@@ -14,6 +18,7 @@ RUN pnpm build
 FROM mcr.microsoft.com/playwright:v1.60.0-noble
 WORKDIR /app
 ENV NODE_ENV=production
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable pnpm
 COPY backend/package.json backend/pnpm-lock.yaml backend/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile --prod

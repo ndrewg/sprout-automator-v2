@@ -24,6 +24,10 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
   exit 1
 }
 
+# Unattended: without this, corepack asks "Corepack is about to download pnpm…"
+# and blocks on first run (the compose build does the same — both need it).
+$env:COREPACK_ENABLE_DOWNLOAD_PROMPT = "0"
+
 # --- 1. Prerequisites -----------------------------------------------------------
 
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
