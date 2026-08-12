@@ -45,6 +45,20 @@ services:
       SESSION_SECRET: ${SESSION_SECRET}
       DATA_DIR: /app/data
       SPROUT_URL: ${SPROUT_URL:-https://kmcsolutions.hrhub.ph/}
+      # The remaining config.ts keys are passed through with plain ${KEY}
+      # interpolation — NO defaults here. config.ts is the single source of
+      # truth for defaults; a duplicated default in compose is a second place
+      # to be wrong, and an unset key (empty string in the container) must
+      # behave identically to an unset key in a native run (config.ts treats
+      # both as absent).
+      APP_URL: ${APP_URL}
+      AUTH_RATE_LIMIT: ${AUTH_RATE_LIMIT}
+      MAIL_FROM: ${MAIL_FROM}
+      MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS}
+      MISSED_RUN_GRACE_MINUTES: ${MISSED_RUN_GRACE_MINUTES}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      SIGNUP_ALLOWED: ${SIGNUP_ALLOWED}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS}
       TZ: ${TZ:-Asia/Manila}
     ports:
       - "${BACKEND_PORT:-3000}:3000"

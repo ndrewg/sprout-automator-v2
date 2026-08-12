@@ -12,9 +12,16 @@
 # 3. Sets NODE_ENV=production explicitly, overriding the base file's
 #    `${NODE_ENV:-development}` interpolation from .env. Under production the
 #    session cookie is Secure, which is what you want behind Caddy.
-# 4. Passes through the production config keys the base file doesn't know
-#    about: APP_URL, SIGNUP_ALLOWED, RESEND_API_KEY, MAIL_FROM,
-#    MAX_CONCURRENT_RUNS, MISSED_RUN_GRACE_MINUTES, AUTH_RATE_LIMIT.
+# 4. The base docker-compose.yml (post phase-8) already passes every config
+#    key through with ${KEY} interpolation, so this overlay only re-declares
+#    the keys it genuinely overrides: APP_URL (kept its prod placeholder
+#    default so the overlay boots before a domain exists — see DEPLOY.md
+#    "Local verification"), and SIGNUP_ALLOWED/RESEND_API_KEY/MAIL_FROM as
+#    empty-by-default passthroughs. The numeric keys (MAX_CONCURRENT_RUNS,
+#    MISSED_RUN_GRACE_MINUTES, AUTH_RATE_LIMIT) carry NO default here —
+#    config.ts is the single source of truth, and an unset key in the
+#    container (empty string) is treated as absent by config.ts just like an
+#    unset key in a native run.
 
 services:
   caddy:
@@ -48,9 +55,9 @@ services:
       SIGNUP_ALLOWED: ${SIGNUP_ALLOWED:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       MAIL_FROM: ${MAIL_FROM:-}
-      MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-3}
-      MISSED_RUN_GRACE_MINUTES: ${MISSED_RUN_GRACE_MINUTES:-20}
-      AUTH_RATE_LIMIT: ${AUTH_RATE_LIMIT:-10}
+      MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS}
+      MISSED_RUN_GRACE_MINUTES: ${MISSED_RUN_GRACE_MINUTES}
+      AUTH_RATE_LIMIT: ${AUTH_RATE_LIMIT}
     # `!reset` EMPTIES the base file's ports list on merge instead of appending
     # to it — the backend stops publishing 3000 and only Caddy reaches it.
     ports: !reset []

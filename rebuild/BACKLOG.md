@@ -62,6 +62,8 @@ The rest fail in the same quiet way: `APP_URL` stays `http://localhost:3000`, so
 Add the seven to `backend.environment` with `${KEY}` passthrough, defaulting only where `config.ts` already does. Ten minutes, and it unblocks § 3.
 
 > **Promoted to `phases/phase-8-environment-and-limits.md` § 8A (2026-08-12).** Work it from there.
+>
+> **Closed 2026-08-12 (phase 8 §8A).** All seven keys now pass through `docker-compose.yml` `backend.environment` with plain `${KEY}` interpolation and no compose defaults; `config.ts` treats the empty string Compose emits for an unset key exactly like an unset key (so a dial behaves identically inside and outside Docker); `docker-compose.prod.yml` re-declares only the keys it genuinely overrides. Same commit: `TRUST_PROXY_HOPS` joined the passthrough (§ 8C) so no new unreachable key was created.
 
 ## 5. Onboarding material + the Gmail-only constraint in the fine print
 

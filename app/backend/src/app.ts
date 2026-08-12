@@ -28,8 +28,15 @@ import { notificationsRouter } from "./routes/notifications";
 
 export const app = express();
 
-// Behind a reverse proxy in production (Caddy, Phase 5).
-app.set("trust proxy", 1);
+// Behind a reverse proxy in production (Caddy, Phase 5). The hop count is
+// configurable via TRUST_PROXY_HOPS (default 1 = today's behaviour; 0 disables
+// proxy trust). Behind a Cloudflare Tunnel chain — client → CF edge →
+// cloudflared → Express — leave it at 1 and let the rate limiters key on
+// CF-Connecting-IP (only from a trusted Cloudflare peer — see
+// middleware/security.ts; none exists today, so they key on req.ip) instead
+// of raising it, since the true client is not at a predictable X-Forwarded-For
+// position there.
+app.set("trust proxy", config.TRUST_PROXY_HOPS);
 
 // Strict security headers (CSP, HSTS, X-Frame-Options, …) on every response.
 app.use(securityHeaders);

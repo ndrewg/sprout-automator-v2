@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
+import { config } from "../../src/config";
 import { db } from "../../src/db/client";
 import { auditLog, resetTokens, users } from "../../src/db/schema";
 import { hashPassword } from "../../src/lib/passwords";
@@ -295,7 +296,7 @@ describe("email verification (§4B.2)", () => {
     expect(
       getRes.headers.get("ratelimit-policy"),
       "/auth/verify (GET) is not rate limited",
-    ).toBe("10;w=900");
+    ).toBe(`${config.AUTH_RATE_LIMIT};w=900`);
 
     const resendRes = await request("/auth/verify/resend", {
       method: "POST",
@@ -303,6 +304,6 @@ describe("email verification (§4B.2)", () => {
     expect(
       resendRes.headers.get("ratelimit-policy"),
       "/auth/verify/resend is not rate limited",
-    ).toBe("10;w=900");
+    ).toBe(`${config.AUTH_RATE_LIMIT};w=900`);
   });
 });

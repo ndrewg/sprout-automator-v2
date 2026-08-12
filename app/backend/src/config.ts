@@ -1,6 +1,16 @@
 import { z } from "zod";
 import { parseSignupAllowlist } from "./lib/signup-allowlist";
 
+// Compose passes every ${KEY} through as the empty string when the variable is
+// unset, while a native (tsx --env-file) run leaves it undefined. Both must
+// mean "absent" so an unset key behaves identically inside and outside Docker
+// and the defaults below stay the single source of truth. The default has to
+// sit INSIDE the preprocess: zod's `.default()` only fires on `undefined`, so
+// the "" -> undefined conversion must happen before the inner schema (which
+// carries the default) runs.
+const emptyToUndefined = (value: unknown): unknown =>
+  value === "" ? undefined : value;
+
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   PORT: z.coerce.number().int().positive().default(3000),
@@ -12,8 +22,16 @@ const envSchema = z.object({
   SESSION_SECRET: z.string().min(32, "SESSION_SECRET must be >=32 chars"),
   DATA_DIR: z.string().default("./data"),
   SPROUT_URL: z.string().url().default("https://kmcsolutions.hrhub.ph/"),
-  MAX_CONCURRENT_RUNS: z.coerce.number().int().min(1).max(20).default(3),
-  MISSED_RUN_GRACE_MINUTES: z.coerce.number().int().min(1).max(180).default(20),
+  MAX_CONCURRENT_RUNS: z
+    .preprocess(
+      emptyToUndefined,
+      z.coerce.number().int().min(1).max(20).default(3),
+    ),
+  MISSED_RUN_GRACE_MINUTES: z
+    .preprocess(
+      emptyToUndefined,
+      z.coerce.number().int().min(1).max(180).default(20),
+    ),
   // Signup gating (§4A.2): comma-separated list of allowed addresses/domains.
   // Optional outside production (unset = open signup, logged as a warning at
   // startup); REQUIRED in production — see the check in loadConfig.
@@ -21,19 +39,40 @@ const envSchema = z.object({
   // Public base URL for emailed links (password reset, later verify). Dev
   // default is the local backend, which serves the built SPA in the production
   // image; set APP_URL to the real origin in production.
-  APP_URL: z.string().url().default("http://localhost:3000"),
+  APP_URL: z
+    .preprocess(
+      emptyToUndefined,
+      z.string().url().default("http://localhost:3000"),
+    ),
   // Email (§4B.1): both optional. When either is unset, mailer.ts logs the
   // email (recipient + subject only) instead of sending, so dev needs no
   // provider and no reset token ever reaches a log file.
   RESEND_API_KEY: z.string().optional(),
   MAIL_FROM: z.string().optional(),
-  // Auth rate-limit budget: requests per 15 min per IP, shared across login,
-  // signup, forgot-password and reset (one authLimiter instance). Configurable
-  // so a deploy that legitimately exceeds 10 — e.g. a team behind one NAT — can
-  // raise it without a code change, and so the e2e suite (which exercises
-  // flows, not limits) can set its own headroom. The 11th-is-429 property is
-  // asserted by the integration suite at the default.
-  AUTH_RATE_LIMIT: z.coerce.number().int().min(1).max(1000).default(10),
+  // Auth rate-limit budget: requests per 15 min per client IP, shared across
+  // login, signup, forgot-password and reset (one authLimiter instance).
+  // Configurable so a deploy that legitimately exceeds the budget — e.g. a
+  // team behind one NAT — can raise it without a code change, and so the e2e
+  // suite (which exercises flows, not limits) can set its own headroom. The
+  // budget-is-enforced property is asserted by the integration suite at the
+  // default (30 as of phase 8 §8B; the test derives its loop bound from this
+  // value so a future change does not break it again).
+  AUTH_RATE_LIMIT: z
+    .preprocess(
+      emptyToUndefined,
+      z.coerce.number().int().min(1).max(1000).default(30),
+    ),
+  // Number of trusted reverse-proxy hops between the client and Express
+  // (app.set("trust proxy", …)). Default 1 — a single reverse proxy, which is
+  // today's behaviour. 0 disables proxy trust (the socket address is the
+  // client). Behind a Cloudflare Tunnel chain (client → CF edge → cloudflared
+  // → Express) keep it at 1: the rate limiters key on CF-Connecting-IP — but
+  // ONLY when the request actually arrived from a trusted Cloudflare peer
+  // (see middleware/security.ts; no tunnel exists in any deployment today, so
+  // they key on req.ip) — instead of raising it, since the true client is not
+  // at a predictable X-Forwarded-For position there.
+  TRUST_PROXY_HOPS: z
+    .preprocess(emptyToUndefined, z.coerce.number().int().min(0).default(1)),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;

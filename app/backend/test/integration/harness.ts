@@ -126,18 +126,25 @@ export type TestResponse = {
 };
 
 /**
- * Thin fetch wrapper. Sends the sid cookie when given. Returns status + body
- * so every route test asserts on both.
+ * Thin fetch wrapper. Sends the sid cookie when given, and any extra headers
+ * (e.g. CF-Connecting-IP for the rate-limit keying test). Returns status +
+ * body so every route test asserts on both.
  */
 export async function request(
   path: string,
-  opts?: { cookie?: Cookie; method?: string; body?: unknown },
+  opts?: {
+    cookie?: Cookie;
+    method?: string;
+    body?: unknown;
+    headers?: Record<string, string>;
+  },
 ): Promise<TestResponse> {
   const baseUrl = await serverBaseUrl();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
   if (opts?.cookie) headers["Cookie"] = opts.cookie;
+  if (opts?.headers) Object.assign(headers, opts.headers);
   const res = await fetch(`${baseUrl}${path}`, {
     method: opts?.method ?? "GET",
     headers,

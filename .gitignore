@@ -16,9 +16,20 @@ app/backend/public/
 # Logs
 *.log
 
-# curl cookie jars from manual API testing — these hold live session ids
+# curl cookie jars from manual API testing — these hold live session ids.
+# A file written as `curl -c jar` is named exactly `jar`, which `*.jar` does
+# not match (no dot). Widen deliberately: `jar` (bare), `cookie*` (any cookie
+# prefix), and `*.cookies` (a cookies-only extension).
 *.jar
+jar
+cookie*
+*.cookies
 cookies.txt
+
+# Magic Context (opencode) per-project tool state — local, nothing sensitive,
+# never commit it. (Was untracked + not ignored during phase 8; added here so a
+# blanket `git add` cannot stage its nested .gitignore.)
+.cortexkit/
 
 # Test artifacts (Playwright writes these on every run)
 test-results/
