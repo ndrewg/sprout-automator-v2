@@ -8,7 +8,15 @@ Everything known-missing that isn't already a phase file, ordered by *when it wi
 
 ---
 
-> **Updated 2026-08-11 (2).** §§ 2, 3, 4, 5 and 8 are now specced as executable gates in [`phases/phase-8-rollout-readiness.md`](./phases/phase-8-rollout-readiness.md) — work them from there, not from these summaries. Item numbers below are **stable**; phase 8 cites them, so do not renumber.
+> **Updated 2026-08-12 — brainstormed and re-scoped around a ~5-person pilot, not a 30-user launch.** The single large phase 8 was decomposed into three:
+>
+> | Phase | Content | From |
+> |---|---|---|
+> | [`phase-8-environment-and-limits.md`](./phases/phase-8-environment-and-limits.md) | compose passthrough + `jar` · `AUTH_RATE_LIMIT` 10→30 · real-client-IP keying | §§ 4, 3 (cheap option) |
+> | [`phase-9-runs-history.md`](./phases/phase-9-runs-history.md) | `GET /runs` limit + `hasMore` · dates + Show more · Gmail-only copy | new · § 5 |
+> | [`phase-10-admin-visibility.md`](./phases/phase-10-admin-visibility.md) | `ADMIN_EMAILS` + `requireAdmin` + overview + panel | § 8 |
+>
+> **Deferred with reasons recorded below: §§ 2, 3 (the rewrite), 8 (until a second user exists).** Item numbers are **stable** — the phase files cite them, so do not renumber.
 
 ## 1. Delete `_archive/` — ✅ DONE (verified absent 2026-08-11)
 
@@ -24,6 +32,8 @@ The rebuild is complete and validated against live HRHub. Nothing in `_archive/`
 
 Prune `screenshots/<userId>/<runId>/` older than ~14 days; keep failures longer than successes if it's cheap, since those carry the forensic value. A nightly job in the container or on the host; either is fine.
 
+> **Deferred 2026-08-12, deliberately.** Considered for phase 8 and cut. **This is triggered by the disk, not the headcount.** At 5 users it is ~24 MB/day; even at 30 it is ~145 MB/day, and the current host has 565 GB free — years of runway either way. It becomes urgent the day this moves to an 80–160 GB VPS, and not before. Deferring it does **not** cap the user count.
+
 ## 3. IP-keyed auth limiter locks out a whole team behind one NAT
 
 **Bites the morning you onboard people.** Every colleague on the corporate network shares one IP. `authLimiter` is 10 requests / 15 min keyed by IP and, since 4B, covers login, signup, forgot-password and reset as a single shared budget. A few people fumbling passwords the same morning exhaust it for everyone — the rest get "Too many attempts" on their first try of the day with no hint that a colleague caused it.
@@ -32,6 +42,10 @@ Three options; **this needs a deliberate decision, not whichever is easiest to i
 - **Raise the budget** (10 → 30 / 15 min). Cheapest. A small trusted team rarely needs the defence 10 provides, and `AUTH_RATE_LIMIT` already makes it a config change.
 - **Key by email with a looser IP backstop** (per-account 5/15 min, per-IP 30/15 min). Correct semantics — a brute-forcer targets an account, not an IP — but needs a per-email counter covering the "no such user" path too, keyed on the submitted (lowercased) address.
 - **Give the reset endpoints their own limiter.** Stops a reset flow consuming the login budget; still leaves two humans sharing one budget within an endpoint.
+
+> **Decided 2026-08-12: option 1 now, option 2 later.** Phase 8 § 8B takes the cheap route — default 10 → 30 — which is sufficient for a small trusted pilot and, after § 4 lands, is a config change rather than a code change. **This entry stays open for the email-keyed rewrite**, which is still the correct design and becomes necessary around ~25 users, where a per-IP budget that large stops defending anything.
+>
+> ⚠️ **A Cloudflare Tunnel deployment (§ 12) makes this *more* urgent, not less.** Behind a tunnel every request can arrive from the same address, so per-IP keying may be meaningless rather than merely coarse. Phase 8 § 8C mitigates the immediate danger by keying on `CF-Connecting-IP`, but per-account limiting is the real answer.
 
 ## 4. `docker-compose.yml` silently drops seven config keys
 
@@ -47,6 +61,8 @@ The rest fail in the same quiet way: `APP_URL` stays `http://localhost:3000`, so
 
 Add the seven to `backend.environment` with `${KEY}` passthrough, defaulting only where `config.ts` already does. Ten minutes, and it unblocks § 3.
 
+> **Promoted to `phases/phase-8-environment-and-limits.md` § 8A (2026-08-12).** Work it from there.
+
 ## 5. Onboarding material + the Gmail-only constraint in the fine print
 
 **Before you invite anyone.** `lib/imap-otp.ts` hardcodes `imap.gmail.com:993` — fine for Gmail *and* Google Workspace domains (same host, App Passwords identical), useless for Microsoft 365 or anything else. Anyone whose HRHub codes land in a non-Google mailbox needs a forwarding rule into Gmail before the tool works for them at all.
@@ -56,6 +72,8 @@ Two places, and the order matters:
 2. **An onboarding one-pager or deck** for the "what is this and why would I use it" conversation: what it does, what it stores and how it's encrypted, the ~5-minute setup, what the notifications mean, and that it clocks *you* in under *your* credentials so accuracy remains your responsibility.
 
 State plainly in both: **a missed-run alert means "the automation didn't run", not "you aren't clocked in"** — someone who clocked in by hand still gets one. Without that sentence, people either panic or learn to ignore the alerts.
+
+> **Split 2026-08-12.** Part 1 (the in-app copy) is promoted to `phases/phase-9-runs-history.md` § 9C. **Part 2 (the one-pager) stays here** — it is a human deliverable, not code.
 
 ## 6. Password reveal on every password field
 
@@ -73,6 +91,8 @@ State plainly in both: **a missed-run alert means "the automation didn't run", n
 
 **You currently learn a colleague's automation is broken when they tell you.** `users.is_admin` exists, is returned by `publicUser`, and gates nothing (`phase-4-security.md` § 4B.7 sketches it). Minimum useful version: an admin-only read endpoint listing each user's last run per action with status and timestamp. Not impersonation, not credential access — just "whose automation is failing". Rank rises sharply the moment anyone else is using this.
 
+> **Specced but gated 2026-08-12.** Fully written up in `phases/phase-10-admin-visibility.md`. **Do not build it until a second person has an account** — with one user the overview is a table with one row and zero information. The phase also documents what the summary above understates: `is_admin` is *inert*, so there is currently no way for anyone to become an admin, and the grant mechanism must be built before any admin surface can exist.
+
 ## 9. OTP submission via Telegram reply
 
 **The manual OTP fallback is unusable in the one scenario it was built for.** At 05:30 you are asleep; if IMAP is slow the run waits five minutes and dies. The dashboard paste-in box only helps someone already awake and watching.
@@ -89,6 +109,24 @@ Phase 6 landed the transport, the settings row and the routes, so the channel ex
 
 1. `app/backend/test/services/otp-acquisition.test.ts:73` ("stops only the winning attempt's poller") **does not discriminate** — it passes against the reintroduced run-scoped-controller bug because the mock `pollForOtp` ignores the signal. Only the first test (`:42-71`) protects the fresh-controller property; a future edit deleting that first test would silently lose the coverage. Make the second test assert on the captured signal (snapshotted at call time), or delete it so a removal is loud.
 2. `errorSummary` (`lib/text.ts`) is a **pure passthrough**: if any error cause ever carried a secret, it would land verbatim in `runs.error` and the Telegram failure message (`renderRunFinishedMessage` embeds it). No *current* source can produce such a cause (no `src` error interpolates a credential; imapflow 1.4.2 redacts creds), and the new rule-4 integration assertion (`otp-error-unwrap.test.ts:143-146`) is vacuous by construction — benign fixed-string causes. **Fix:** route `errorSummary` output through a string-redaction step mirroring the key list `lib/logger.ts` already maintains (`password`, `appPassword`, `gmailAppPassword`, `code`, `otp`, `botToken`, …) before the message is persisted or notified, plus a unit test injecting a secret-bearing cause — that test fails today, so the redaction ships with it.
+
+## 12. Deployment path: domain → Resend → Cloudflare Tunnel
+
+**The cheapest way to make this reachable, and the only one that unblocks password reset.** Added 2026-08-12 after costing a Hetzner VPS at ~₱2,500–2,800/month (Singapore region — the premium the original spec priced at EU rates; see `phase-5-deploy-ops.md` § 5.1).
+
+The host is a ThinkPad E14 Gen 5: 40 GB RAM, 12 threads, 565 GB free — **more capable than a ₱2,754/month CPX32**. What it lacks is a public hostname and outbound mail.
+
+**One purchase unlocks both, and it is not the expensive part.** A domain via Cloudflare Registrar is at-cost, ~$10/yr ≈ **₱700/yr (~₱58/month)** — roughly 2% of the VPS. Both remaining blockers require it:
+- **Resend** free tier only delivers to your own account address from `onboarding@resend.dev`; reaching colleagues needs a verified domain with SPF/DKIM.
+- **Cloudflare Tunnel** quick tunnels are free and domain-less but hand out a random `*.trycloudflare.com` URL **that changes on every restart** — which breaks `APP_URL` and every reset link already sent. A stable named tunnel needs a domain on Cloudflare.
+
+**Steps:** register the domain in Cloudflare → add Resend's SPF/DKIM records to Cloudflare DNS, verify, take an API key → Zero Trust → Networks → Tunnels → create tunnel, install the `cloudflared` connector (simplest as a container in `docker-compose.yml` so it starts and stops with the stack) → public hostname `sprout.<domain>` → service `http://backend:3000` → set `APP_URL`, `RESEND_API_KEY`, `MAIL_FROM`, `SIGNUP_ALLOWED`, `NODE_ENV=production`.
+
+**Five of those six keys are among the seven § 4 discards, so phase 8 § 8A is a hard prerequisite.**
+
+**What it does *not* fix:** the home ISP and laptop uptime become the dependency, and **Docker Desktop needs a logged-in Windows session** — a Windows Update reboot leaves the stack down until someone logs in, which at 05:30 means a missed run for everyone. That is the largest unattended risk on this host and none of the above addresses it.
+
+**What it makes obsolete:** Cloudflare terminates TLS, so `docker-compose.prod.yml` + `Caddyfile` (built for a VPS) are unnecessary in this topology, and `DEPLOY.md` would need rewriting around a tunnel. Keep the Caddy artifacts — they stay correct if a VPS ever happens.
 
 ---
 
