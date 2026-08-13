@@ -144,6 +144,31 @@ The host is a ThinkPad E14 Gen 5: 40 GB RAM, 12 threads, 565 GB free — **more 
 
 ---
 
+## 15. Backend CI is red: `pnpm audit` fails on 17 advisories
+
+**Found 2026-08-14, on the first push after phase 9.** The CI **backend** job fails at `pnpm audit --audit-level=high`: 17 vulnerabilities, 7 moderate / 9 high / 1 critical. **No code caused it** — `pnpm audit` consults a live advisory database, so a repo that was green yesterday fails today because someone published an advisory. It had been red for a while; nobody had pushed to notice.
+
+**Why this outranks the vulnerabilities themselves:** a permanently-red pipeline is one people stop reading. Phase 9 had just wired the frontend unit tests into CI so a regression would surface there — that signal is worth nothing if the run is red anyway.
+
+**13 of 17 do not ship.** They come through `vitest` (a devDependency), and the production image installs `--prod`. That includes the lone "critical" — Vitest's UI server exposing arbitrary files — which also requires running Vitest UI, which this project never does.
+
+**Four are runtime dependencies:**
+
+| Package | Installed | Fixed in | Issue |
+|---|---|---|---|
+| **`drizzle-orm`** | **^0.36.0** | **≥0.45.2** | **HIGH — SQL injection via improperly escaped SQL identifiers** |
+| `date-holidays` | ^3.23.12 | — | js-yaml quadratic CPU (×2, transitive) |
+| `mailparser` | ^3.7.2 | — | linkify-it ReDoS via `mailto:` (transitive) |
+| `imapflow` | ^1.3.3 | — | ip-address leading-zero octets (transitive) |
+
+**On the drizzle one:** "SQL identifiers" means table and column names, which in this codebase come from `db/schema.ts` and are static — every user-supplied value goes through parameter binding. So the app is **most likely not exploitable**; that is reasoning from the advisory's shape, not a proof, and nine minors behind on the library that talks to the database is not a defensible position.
+
+**Specced as [`phases/phase-11-dependency-hygiene.md`](./phases/phase-11-dependency-hygiene.md)** — 11A bump backend vitest (clears most of the noise), 11B upgrade Drizzle deliberately with the 106 integration tests as the safety net, 11C the three transitives, 11D decide what the gate means. **Do it before phase 10**, which is gated on a second user existing while this is gated on nothing.
+
+**§ 11D is the part that stops the recurrence.** The audit gate *will* go red again on a day nobody committed — that is what a live-advisory check is. The decision to make: keep it blocking, scope it to `--prod` (13 of today's 17 findings do not ship), or make it advisory. Recommendation is `--prod` blocking with a separate non-blocking dev audit, recorded in `reference/supply-chain-and-ci.md`.
+
+---
+
 ## Closed
 
 - ~~Session hardening leftovers~~ — idle timeout, password reset, email verification and account deletion all shipped in 4B. Data export was deliberately skipped.

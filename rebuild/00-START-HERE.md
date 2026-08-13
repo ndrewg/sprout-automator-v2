@@ -84,6 +84,7 @@ Read the foundation docs in order once, then work the phases.
 - [`phases/phase-7-schedule-pause.md`](./phases/phase-7-schedule-pause.md) — pause / leave days ✅
 - [`phases/phase-8-environment-and-limits.md`](./phases/phase-8-environment-and-limits.md) — **next**: compose passes all fourteen config keys, `AUTH_RATE_LIMIT` 10→30, real-client-IP keying. Small; **everything else is unconfigurable until 8A ships**
 - [`phases/phase-9-runs-history.md`](./phases/phase-9-runs-history.md) — `GET /runs` limit + `hasMore`, dates + "Show more", Gmail-only copy
+- [`phases/phase-11-dependency-hygiene.md`](./phases/phase-11-dependency-hygiene.md) — **next**: backend CI is red on `pnpm audit`; bump vitest, upgrade Drizzle off a HIGH advisory, decide what the gate means
 - [`phases/phase-10-admin-visibility.md`](./phases/phase-10-admin-visibility.md) — admin role + overview. **Specced but gated on a second user existing**
 
 **Reference (attach to a phase when it says so; reproduce these verbatim):**
