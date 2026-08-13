@@ -78,6 +78,13 @@
 
 **Gate 9B:** `cd app/frontend && pnpm lint && pnpm build && pnpm test:e2e`
 
+> ⚠️ **As-built (found 2026-08-13):** the frontend had **no unit-test runner** when this phase was written — § 9B's "Unit: the date formatter…" test had nowhere to run and `app/frontend/package.json` had no `test` script. Per an explicit human decision, **vitest `^4.1.x` was added as a frontend devDependency** (tooling, not product surface; the backend already runs vitest). **Vitest 4.1 specifically** — the first major supporting **Vite 8** (frontend `vite` is `^8.1.0`); do NOT copy the backend's vitest 2.1, which pins Vite 5. Unit tests live in `src/**/*.test.{ts,tsx}` and `pnpm test` runs them, so **the 9B gate is `pnpm lint && pnpm test && pnpm build && pnpm exec playwright install chromium && pnpm test:e2e`**.
+>
+> Also as-built:
+> - The **"Showing 10 of 24"** count in the spec needs a total the `{ runs, hasMore }` contract deliberately omits (no `COUNT(*)`), so the panel renders **`Showing N`** (N = rows shown) plus a "Show more" button when `hasMore` — honest and monotonic, but not the literal "of 24" phrasing.
+> - The e2e "Show more" test seeds runs through a new backend helper `app/backend/test/e2e-seed-runs.ts` (direct inserts into `sprout_test`; runs created via `POST /runs` would enqueue the real executor).
+> - **Correction (2026-08-14):** the sentence this replaces is **wrong** — `.github/workflows/ci.yml` exists and is tracked. It was **created in phase 0, `2aa6559`**, and phase L (`4323518`) added `pnpm lint` to both jobs; its `frontend` job ran only `pnpm lint` + `pnpm build` until this phase, when it was updated to also run `pnpm test`, so the new frontend vitest suite (5 tests) is gated in CI exactly as the phase intended.
+
 > ⚠️ **Pre-flight for e2e.** `@playwright/test` is a frontend devDependency but is **not** in the frontend's `pnpm-workspace.yaml` `allowBuilds`, so its browser download is blocked. It works today only because the backend's `playwright install chromium` populated the shared `~/.cache/ms-playwright`. Run `pnpm exec playwright install chromium` before the gate; a missing browser is an environment problem, not a failing test. See `STATE.md` § Known gaps.
 
 ---

@@ -6,13 +6,16 @@ import {
 } from "@tanstack/react-query";
 import { api, type Run } from "@/api";
 
-export function useRuns() {
-  return useQuery<Run[]>({
-    queryKey: ["runs"],
-    queryFn: async () => (await api.listRuns()).runs,
+export function useRuns(limit: number) {
+  return useQuery<{ runs: Run[]; hasMore: boolean }>({
+    // The limit is part of the key, NOT a separate infinite-query page: useRuns
+    // polls adaptively, and merged infinite-query pages race the refresh — every
+    // tick refetches every page. One keyed query refetches as a unit (phase 9B).
+    queryKey: ["runs", limit],
+    queryFn: async () => api.listRuns(limit),
     // Adaptive polling: tighten while any run is active.
-    refetchInterval: (query: Query<Run[]>) => {
-      const runs = query.state.data;
+    refetchInterval: (query: Query<{ runs: Run[]; hasMore: boolean }>) => {
+      const runs = query.state.data?.runs;
       const active = runs?.some(
         (r) => r.status === "pending" || r.status === "running",
       );

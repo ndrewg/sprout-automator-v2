@@ -124,7 +124,11 @@ Body: `{ "action": "in" | "out" }` (`.strict()`).
 - `409 { "error": "A run is already in progress" }` — the partial unique index rejected a second active run (`23505` → `already_running`).
 
 ### `GET /runs`
-- `200 { "runs": Run[] }` — newest first, limit 20.
+- `200 { "runs": Run[], "hasMore": boolean }` — newest first (`started_at desc`). Additive since phase 9A: `runs` keeps its shape and ordering; `hasMore` is new.
+- Optional `limit` query param: Zod `coerce.number().int().min(1).max(100).default(10)`. Out-of-range or non-numeric → `400 { "error": "Invalid input", "details": … }` — never a silent clamp.
+- The query schema is `.strict()` like every body schema: any **unknown** query key (e.g. `?limit=10&bogus=1`) also → `400 { "error": "Invalid input", "details": … }`.
+- `hasMore` is computed by selecting `limit + 1` rows and reporting whether the extra row existed — never a second `COUNT(*)`.
+- Scoped to `req.user.id`.
 
 ### `GET /runs/:id`
 - `200 { "run": Run }` (scoped to the user).
@@ -226,7 +230,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ action }),
     }),
-  listRuns: () => request<{ runs: Run[] }>("/runs"),
+  listRuns: (limit?: number) =>
+    request<{ runs: Run[]; hasMore: boolean }>(
+      limit ? `/runs?limit=${limit}` : "/runs",
+    ),
   submitOtp: (runId: string, code: string) =>
     request<{ ok: true }>(`/runs/${runId}/otp`, {
       method: "POST",

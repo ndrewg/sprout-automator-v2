@@ -220,8 +220,8 @@ export function CredentialsPanel() {
         <CardHeader>
           <CardTitle>Gmail (for OTP retrieval)</CardTitle>
           <CardDescription>
-            Used to read the one-time code during a run. Save applies to this
-            card only.
+            The mailbox HRHub mails your one-time codes to must be Gmail or
+            Google Workspace. Save applies to this card only.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
@@ -277,6 +277,14 @@ export function CredentialsPanel() {
                 <Alert variant="info">
                   <AlertTitle>Set up a Gmail App Password (~5 min)</AlertTitle>
                   <AlertDescription>
+                    <p className="mb-3">
+                      The mailbox must be <strong>Gmail or Google
+                      Workspace</strong> — App Passwords only exist there. If
+                      HRHub sends your codes to a different provider (for
+                      example Microsoft 365), set up a forwarding rule from
+                      that mailbox into a Gmail account, then enter the Gmail
+                      address here.
+                    </p>
                     <ol className="ml-4 flex list-decimal flex-col gap-1">
                       <li>
                         Enable 2-Step Verification:{" "}

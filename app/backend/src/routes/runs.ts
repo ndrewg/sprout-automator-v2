@@ -16,6 +16,11 @@ runsRouter.use(requireAuth);
 
 const startSchema = z.object({ action: z.enum(["in", "out"]) }).strict();
 const otpSchema = z.object({ code: z.string().regex(/^\d{4,6}$/) }).strict();
+// Query params are strings; coerce to int. Out-of-range or non-numeric is a 400
+// — never a silent clamp, which would lie about what was returned (phase 9A).
+const listQuerySchema = z
+  .object({ limit: z.coerce.number().int().min(1).max(100).default(10) })
+  .strict();
 
 function publicRun(run: Run) {
   return {
@@ -52,8 +57,15 @@ runsRouter.post("/", async (req: Request, res: Response) => {
 });
 
 runsRouter.get("/", async (req: Request, res: Response) => {
-  const rows = await listRuns(req.user!.id);
-  res.json({ runs: rows.map(publicRun) });
+  const parsed = listQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    res
+      .status(400)
+      .json({ error: "Invalid input", details: parsed.error.flatten() });
+    return;
+  }
+  const { runs, hasMore } = await listRuns(req.user!.id, parsed.data.limit);
+  res.json({ runs: runs.map(publicRun), hasMore });
 });
 
 // Must be registered before "/:id" so "queue" is not captured as an id.

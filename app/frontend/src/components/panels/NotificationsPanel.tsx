@@ -263,6 +263,11 @@ export function NotificationsPanel() {
                     </FieldLabel>
                   </Field>
                 </div>
+                <FieldDescription>
+                  A missed-run alert means the automation didn't run, not that
+                  you weren't clocked in — clocking in by hand still triggers
+                  one.
+                </FieldDescription>
               </Field>
             </FieldGroup>
 

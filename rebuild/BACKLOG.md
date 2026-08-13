@@ -16,6 +16,8 @@ Everything known-missing that isn't already a phase file, ordered by *when it wi
 > | [`phase-9-runs-history.md`](./phases/phase-9-runs-history.md) | `GET /runs` limit + `hasMore` · dates + Show more · Gmail-only copy | new · § 5 |
 > | [`phase-10-admin-visibility.md`](./phases/phase-10-admin-visibility.md) | `ADMIN_EMAILS` + `requireAdmin` + overview + panel | § 8 |
 >
+> **Phase 9 shipped 2026-08-13** (gates 9A/9B/9C green; `[manual]` checks listed in `reviews/`-style handoff outstanding — dates, Show more, live-run polling, 375px, copy readability). § 5 part 1 (the in-app copy) is closed with it; part 2 (the onboarding one-pager) remains a human deliverable.
+>
 > **Deferred with reasons recorded below: §§ 2, 3 (the rewrite), 8 (until a second user exists).** Item numbers are **stable** — the phase files cite them, so do not renumber.
 
 ## 1. Delete `_archive/` — ✅ DONE (verified absent 2026-08-11)
@@ -76,6 +78,8 @@ Two places, and the order matters:
 State plainly in both: **a missed-run alert means "the automation didn't run", not "you aren't clocked in"** — someone who clocked in by hand still gets one. Without that sentence, people either panic or learn to ignore the alerts.
 
 > **Split 2026-08-12.** Part 1 (the in-app copy) is promoted to `phases/phase-9-runs-history.md` § 9C. **Part 2 (the one-pager) stays here** — it is a human deliverable, not code.
+>
+> **Part 1 closed 2026-08-13 (phase 9 § 9C).** The `CredentialsPanel` Gmail walkthrough now states the mailbox must be Gmail or Google Workspace and how to forward from another provider, and `NotificationsPanel` states that a missed-run alert means "the automation didn't run", not "you aren't clocked in". **Part 2 (the onboarding one-pager) remains open** and is listed as a `[manual]` deliverable of § 9C.
 
 ## 6. Password reveal on every password field
 
@@ -129,6 +133,14 @@ The host is a ThinkPad E14 Gen 5: 40 GB RAM, 12 threads, 565 GB free — **more 
 **What it does *not* fix:** the home ISP and laptop uptime become the dependency, and **Docker Desktop needs a logged-in Windows session** — a Windows Update reboot leaves the stack down until someone logs in, which at 05:30 means a missed run for everyone. That is the largest unattended risk on this host and none of the above addresses it.
 
 **What it makes obsolete:** Cloudflare terminates TLS, so `docker-compose.prod.yml` + `Caddyfile` (built for a VPS) are unnecessary in this topology, and `DEPLOY.md` would need rewriting around a tunnel. Keep the Caddy artifacts — they stay correct if a VPS ever happens.
+
+## 13. Runs history row-expand control is not keyboard-reachable
+
+**Found 2026-08-14 (phase 9 round-1 tester F4) — pre-existing, NOT a phase-9 regression.** In `RunsPanel.tsx` the entire `<tr>` is the expand target (with `onClick` and no `tabIndex`/`role`); verified that before this phase the committed version had the identical `<tr onClick>`, and phase 9 only changed `py-2` → `py-3`. Tab from "Show more" jumps straight to `BODY` — 10 clickable rows, 0 focusable. The phase's spec pointed `ui-ux-pro-max` § 1 at this exact control and the ≥44 px touch target was met (measured 65 px), but keyboard nav was left broken. Fix: `tabIndex={0}` + `role="button"` + Enter/Space handler (or a real button in the first cell). Independent of the phase-9 working tree; record it so it is not lost.
+
+## 14. Tighten the e2e seed helper's database guard
+
+**Found 2026-08-14 (phase 9 round-2 tester F2) — LOW, non-blocking, test-only helper.** `app/backend/test/e2e-seed-runs.ts` guards with `current_database()` `.includes("test")`, which matches *any* database name containing that substring (`latest`, `contest`, `sprout_prototype` all pass — proven by seeding 3 rows into a throwaway DB named `latest`). The realistic risk (a bare invocation against the real `sprout` DB) is already blocked. Tighten to an exact `sprout_test` match or a `_test`-suffix rule the next time the helper is touched. See `STATE.md` § Known gaps.
 
 ---
 

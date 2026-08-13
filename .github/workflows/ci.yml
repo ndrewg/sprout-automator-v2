@@ -24,4 +24,5 @@ jobs:
       - run: corepack enable pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      - run: pnpm test          # vitest (the src/**/*.test.ts/tsx unit tests)
       - run: pnpm build         # tsc -b && vite build → catches type errors

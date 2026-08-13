@@ -125,7 +125,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ action }),
     }),
-  listRuns: () => request<{ runs: Run[] }>("/runs"),
+  listRuns: (limit?: number) =>
+    request<{ runs: Run[]; hasMore: boolean }>(
+      limit ? `/runs?limit=${limit}` : "/runs",
+    ),
   submitOtp: (runId: string, code: string) =>
     request<{ ok: true }>(`/runs/${runId}/otp`, {
       method: "POST",

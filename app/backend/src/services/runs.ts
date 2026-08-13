@@ -201,13 +201,23 @@ export async function appendRunStep(
   }
 }
 
-export async function listRuns(userId: string): Promise<Run[]> {
-  return db
+/**
+ * Newest-first history for one user. `hasMore` is computed by selecting
+ * `limit + 1` rows and reporting whether the extra row existed — never a second
+ * COUNT(*) (phase 9A: a hardcoded .limit(20) silently dropped every older run).
+ */
+export async function listRuns(
+  userId: string,
+  limit: number,
+): Promise<{ runs: Run[]; hasMore: boolean }> {
+  const rows = await db
     .select()
     .from(runs)
     .where(eq(runs.userId, userId))
     .orderBy(desc(runs.startedAt))
-    .limit(20);
+    .limit(limit + 1);
+  const hasMore = rows.length > limit;
+  return { runs: rows.slice(0, limit), hasMore };
 }
 
 export async function getRun(
