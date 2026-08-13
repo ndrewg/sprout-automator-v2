@@ -219,3 +219,44 @@ git log --follow -- ci.yml   → 4323518 (phase-L, +2 lint lines), 2aa6559 (phas
 ```
 
 The working tree at hand-off is the round-2 fix set exactly (five files with 8/14 mtimes; every other round-1 file byte-verified via blob/mtime); the tester's scratch artifacts (the `latest` database, injected rows in `sprout_test`, env-var shells) were removed.
+
+---
+
+## F. Operator `[manual]` results — 2026-08-14
+
+Run by the human on the **dev PC** (`localhost:3000`, Docker path, image built from `114b42f`). Note this machine has its own database, separate from the laptop that runs the real schedule — hence the small run history.
+
+| # | Check | Result | Evidence |
+|---|---|---|---|
+| 1 | Dates read correctly | ✅ **pass** (partial coverage) | New rows read `Today`; older rows `Mon 10 Aug` / `Fri 7 Aug`, weekdays verified correct against the calendar. **`Yesterday` was not observed** — no run existed dated 13 Aug. That path is covered only by the injected-clock unit tests. |
+| 2 | Show more | ✅ **pass** | At 11 runs: `Showing 10` + a **Show more** button → click → `Showing 12`, button gone. Exercised at 10→12 rather than the row's 10→30→40 (the dataset was smaller), but append, honest count and disappearance-at-end were all demonstrated. |
+| 3 | Show more survives the 1.5 s poll | ✅ **pass — the headline result** | With 12 rows expanded and a row showing status `running` (so the fast poll was active), the list stayed at 12. It did **not** collapse to 10. This is the exact failure `useInfiniteQuery` would have caused, now observed rather than argued. |
+| 4 | 375 px expand | ✅ **pass** | The table scrolls sideways inside its wrapper; the page does not. Step log wraps. See F-1 below for a cosmetic observation. |
+| 5 | CredentialsPanel copy as a first-timer | ✅ **pass** | Under **How do I set this up?**: *"The mailbox must be Gmail or Google Workspace — App Passwords only exist there. If HRHub sends your codes to a different provider (for example Microsoft 365), set up a forwarding rule from that mailbox into a Gmail account, then enter the Gmail address here."* Requirement **and** fallback both present. |
+| 6 | OTP paste bridge accepts a code | ⚠️ **reached, not exercised** | The run did a full OTP login — `Session not found or expired. Attempting login.` → `Waiting for OTP verification code...` (05:54:14) → `OTP code acquired` (05:54:18). The paste box was live for those **4 seconds**; IMAP won the race, as designed, so nothing was typed into it. The control survived the +227-line rewrite and rendered; the *manual typing* path remains unexercised and would need IMAP temporarily unavailable to test. |
+| 7 | Onboarding one-pager | ❌ **not done** | Human deliverable, still open — `BACKLOG.md` § 5 part 2. |
+| 8 | CI ran the frontend tests | ✅ **pass** | Actions run #4 for `114b42f`: **frontend job green in 18 s**, steps `install --frozen-lockfile` → `lint` → **`test` (1 s)** → `build`. This is the F1a fix verified — nothing local could prove it. **The backend job is red for an unrelated reason: see F-2.** |
+
+### Incidental finding — the laptop's scheduled run is confirmed working
+
+Row 6's step log ends:
+
+```
+05:54:37  Already clocked IN today (matched row "08/14/26 IN 05:30 AM") — skipping.
+```
+
+The guard read that row off **live HRHub**, which is stronger evidence than a Telegram notification that the laptop's 05:30 cron fired and clocked in successfully. It also exercises the skip path end to end.
+
+### F-1 (cosmetic, new) — values wrap mid-label at 375 px
+
+The date renders as `Fri 7` / `Aug` on two lines and times as `07:56:22` / `PM`. Not a rule violation — ui-ux-pro-max prefers wrapping to truncation — but the table already scrolls horizontally, so there is no reason to wrap at all. `whitespace-nowrap` on the date and time cells would fix it. Cosmetic; filed as `BACKLOG.md` § 16 rather than reopening phase 9.
+
+### F-2 — the backend CI job is red, and phase 9 did not cause it
+
+`pnpm audit --audit-level=high` fails with 17 advisories (7 moderate / 9 high / 1 critical). No backend dependency changed in phase 9; `pnpm audit` reads a live advisory database, so the pipeline had gone red with no commit behind it and nobody had pushed since to notice. 13 of 17 arrive through `vitest` and do not ship (`--prod`); the material one is **`drizzle-orm ^0.36.0`**, HIGH, SQL injection via improperly escaped SQL identifiers, fixed in ≥0.45.2. Specced as `phases/phase-11-dependency-hygiene.md`, ranked `BACKLOG.md` § 15.
+
+### Verdict
+
+**Six of eight rows pass**, including both of the ones that could only be settled by a human: the poller/"Show more" interaction and CI genuinely running the frontend suite. Row 6 is partial by design rather than by defect. Row 7 is a document nobody has written yet.
+
+**Phase 9 is tagg­able** on this evidence, with row 7 tracked in the backlog and row 6 noted as reached-not-typed-into.

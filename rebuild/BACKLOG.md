@@ -169,6 +169,14 @@ The host is a ThinkPad E14 Gen 5: 40 GB RAM, 12 threads, 565 GB free — **more 
 
 ---
 
+## 16. Runs table wraps values mid-label at 375 px
+
+**Cosmetic, found during the phase-9 `[manual]` pass (2026-08-14).** At 375 px the Date cell renders as `Fri 7` / `Aug` across two lines and Started/Finished as `07:56:22` / `PM`. Not a rule violation — ui-ux-pro-max § 6 `truncation-strategy` prefers wrapping over truncation — but the table already sits in an `overflow-x-auto` wrapper and scrolls horizontally, so wrapping buys nothing and costs vertical space on the smallest screen.
+
+`whitespace-nowrap` on the date and both time cells in `RunsPanel.tsx`. Roll it into whatever next touches that table — it is not worth a round of its own.
+
+---
+
 ## Closed
 
 - ~~Session hardening leftovers~~ — idle timeout, password reset, email verification and account deletion all shipped in 4B. Data export was deliberately skipped.
