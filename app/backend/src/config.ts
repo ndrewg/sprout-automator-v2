@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { parseSignupAllowlist } from "./lib/signup-allowlist";
+import { parseTrustedCloudflarePeers } from "./lib/trusted-peers";
 
 // Compose passes every ${KEY} through as the empty string when the variable is
 // unset, while a native (tsx --env-file) run leaves it undefined. Both must
@@ -79,8 +80,12 @@ const envSchema = z.object({
   // Cloudflare Tunnel today, so the rate limiters key on req.ip and a
   // client-supplied header is ignored no matter how well-formed it is. When a
   // real tunnel is put in front (BACKLOG.md § 12), set this to the address the
-  // backend sees from cloudflared — nothing else. Caddy's address must never be
-  // listed: it forwards a client-supplied header verbatim.
+  // backend sees from cloudflared — nothing else. Entries are IPv4/IPv6
+  // literals or CIDR ranges (e.g. 172.20.0.0/16 — prefer the CIDR form: a bare
+  // container address decays when Docker renumbers the network). Each entry is
+  // validated at boot (see loadConfig) — a malformed one refuses to start.
+  // Caddy's address must never be listed: it forwards a client-supplied header
+  // verbatim.
   TRUSTED_CLOUDFLARE_PEERS: z
     .preprocess(emptyToUndefined, z.string().optional()),
 });
@@ -124,6 +129,22 @@ export function loadConfig(): AppConfig {
           "email-verification link points at the wrong host",
       );
     }
+  }
+  // TRUSTED_CLOUDFLARE_PEERS (§8C hardening): the same "refuse to start on a
+  // bad security-relevant value" stance as SIGNUP_ALLOWED. A typo (stray quote,
+  // "cloudflared", "172.20..4") would otherwise produce a non-empty set that
+  // matches nothing — the gate reports as configured and behaves as off, the
+  // exact §8C failure reached by misconfiguration. Fail at boot instead,
+  // naming the offending position.
+  try {
+    parseTrustedCloudflarePeers(parsed.data.TRUSTED_CLOUDFLARE_PEERS);
+  } catch (err) {
+    throw new Error(
+      "Invalid environment configuration:\n" +
+        `  - TRUSTED_CLOUDFLARE_PEERS: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+    );
   }
   return parsed.data;
 }

@@ -1,6 +1,7 @@
 import { config } from "./config";
 import { logger } from "./lib/logger";
 import { parseSignupAllowlist } from "./lib/signup-allowlist";
+import { trustedCloudflarePeerCount } from "./middleware/security";
 import { app } from "./app";
 import { recoverOrphanedRuns, runQueue } from "./services/run-queue";
 import { executeQueuedRun } from "./services/runs";
@@ -30,6 +31,16 @@ async function start(): Promise<void> {
       "SIGNUP_ALLOWED is not set — signup is open to anyone who can reach this server. Set it before deploying anywhere public.",
     );
   }
+
+  // F3: the trusted-peer set is the gate for honouring CF-Connecting-IP. Log
+  // its SIZE at boot (never the addresses) so an operator can see the gate
+  // armed — a 1 here is the confirmation their TRUSTED_CLOUDFLARE_PEERS change
+  // took effect; a 0 is the normal, safe state. This also makes a wiring break
+  // visible in the boot log.
+  logger.info(
+    { trustedCloudflarePeers: trustedCloudflarePeerCount() },
+    "CF-Connecting-IP trusted-peer gate armed",
+  );
 
   // Register the run executor with the queue. This lives in the startup path,
   // NOT in app.ts: importing the app for a route test must not register an

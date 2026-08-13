@@ -57,3 +57,35 @@ describe("config defaults", () => {
     expect(loadConfig().TRUSTED_CLOUDFLARE_PEERS).toBeUndefined();
   });
 });
+
+describe("config: TRUSTED_CLOUDFLARE_PEERS validation (phase-8 hardening F2)", () => {
+  // The same "refuse to start on a bad security-relevant value" stance as the
+  // SIGNUP_ALLOWED production guard: a typo that yields a non-empty set which
+  // matches nothing must fail at boot, not silently disable the trusted-tunnel
+  // path.
+  it("refuses to start on a malformed entry, naming the key and the position", () => {
+    process.env["TRUSTED_CLOUDFLARE_PEERS"] = "172.20.0.4, cloudflared";
+    expect(() => loadConfig()).toThrow(/TRUSTED_CLOUDFLARE_PEERS/);
+    expect(() => loadConfig()).toThrow(/entry 2/);
+  });
+
+  it("refuses to start on an out-of-range CIDR mask", () => {
+    process.env["TRUSTED_CLOUDFLARE_PEERS"] = "172.20.0.0/33";
+    expect(() => loadConfig()).toThrow(/TRUSTED_CLOUDFLARE_PEERS/);
+  });
+
+  it("starts with valid literals and CIDR ranges", () => {
+    process.env["TRUSTED_CLOUDFLARE_PEERS"] = "172.20.0.4, 172.20.0.0/16";
+    expect(() => loadConfig()).not.toThrow();
+  });
+
+  it("refuses to start on a /0 prefix, which would trust every peer (B8)", () => {
+    process.env["TRUSTED_CLOUDFLARE_PEERS"] = "0.0.0.0/0";
+    expect(() => loadConfig()).toThrow(/TRUSTED_CLOUDFLARE_PEERS/);
+  });
+
+  it("refuses to start on a CIDR with host bits set, instead of widening trust (B10)", () => {
+    process.env["TRUSTED_CLOUDFLARE_PEERS"] = "172.20.0.5/16";
+    expect(() => loadConfig()).toThrow(/TRUSTED_CLOUDFLARE_PEERS/);
+  });
+});

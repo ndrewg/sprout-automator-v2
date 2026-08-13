@@ -269,3 +269,195 @@ The brief's item-4 malformed list includes `1.2.3.4`, `5.6.7.8` and IPv6 alongsi
 | 5 | Gate on: 40 distinct forged headers get distinct buckets | set `TRUSTED_CLOUDFLARE_PEERS` to the gateway, recreate, same probe → 0×429 | ✅ **DONE (tester, 2026-08-12): 40×401, 0×429** |
 | 6 | **Real Cloudflare Tunnel → real per-client IPs reach the limiter** | put a tunnel in front, confirm distinct visitors get distinct auth buckets (and that a forged `CF-Connecting-IP` from a direct connection still cannot) | 🕐 human — the reason § 8C exists; untestable locally |
 
+---
+
+## Round 4 (2026-08-13) — tester, `TRUSTED_CLOUDFLARE_PEERS` hardening pass (F1–F5)
+
+I tried to make the hardening report's claims false: every gate re-run, the CIDR arithmetic attacked as a security control, both F1 directions probed (one live, one by unit test), F2 boot refusals proven in the container, the F3 warn probed for both silence and once-only, the limiter thresholds re-proven live against a rebuilt container, and every new test deliberately broken. **No BLOCKING findings. The safety property holds end-to-end.** The default posture is verified live: with the key unset, 40 distinct forged `CF-Connecting-IP` values share one bucket and the 31st request is 429.
+
+### A. Structural verification this round
+
+**Gates re-run from the implementer's uncommitted tree:**
+- `pnpm lint && pnpm typecheck && pnpm test` → oxlint clean, `tsc --noEmit` clean, **16 files / 153 tests** unit passed. Matches the report.
+- `pnpm test:integration` → **19 files / 101 tests** passed (Postgres up). Matches the report.
+- `docker compose config 2>&1 | grep -c "is not set"` → **0**. Matches the report.
+- Both compose files pass `TRUSTED_CLOUDFLARE_PEERS` and `AUTH_RATE_LIMIT` as `""` by default (`docker compose config`, and `-f docker-compose.yml -f docker-compose.prod.yml config` → prod keeps `NODE_ENV=production`, `APP_URL` placeholder, empty passthroughs). `.env.example` ↔ `config.ts` ↔ compose all consistent on all 16 keys.
+- **No new dependency, no migration:** `git diff` on `package.json`/`pnpm-lock.yaml`/`pnpm-workspace.yaml` → empty; `drizzle/` untouched; `trusted-peers.ts` imports only `node:net`.
+- Working tree after all probes is byte-identical to the implementer's state (10 files, 356+/70−, 2 untracked — verified repeatedly via `git status --short` and `git diff --stat`).
+- The `reviews/phase-8-cf-peer-hardening.md` findings doc is itself **untracked** (`??`) — it ships with this pass's commit.
+
+**CIDR arithmetic attacked head-on** (`src/lib/trusted-peers.ts`, probed directly via tsx against the built module, ~40 assertions):
+
+| Vector | Result |
+|---|---|
+| `172.20.0.0/16` boundaries: `172.20.0.0` in, `172.20.255.255` in, `172.21.0.0` out | **correct — no off-by-one** |
+| `/32` and `/128`: exactly the one host matches (host±1 and the full-form `2001:db8:0:0:0:0:0:1` for `2001:db8::1/128` out/in respectively) | **correct** |
+| `/0` and `::/0` | **accepted and match every peer** — see B8 |
+| `/33`, `/129`, `/-1`, `/abc`, `/0x10`, `/ 24`, `1.2.3.4/`, bare `/24`, `2001:db8::192.0.2.0/120`, `::ffff:172.20.0.0/16` | **all refuse to boot**, each naming the 1-based position and the fix (verified both in the parser and in `loadConfig()` in the container — see F2 probes) |
+| Host bits set: `172.20.0.5/16` | **normalizes to the network** (`base = value & mask`), accepts and matches the whole /16 — see B10 |
+| Cross-family: IPv4 peer vs IPv6 CIDR, IPv6 peer vs IPv4 CIDR (incl. `::/0` vs an IPv4 peer and `0.0.0.0/0` vs an IPv6 peer) | **never match** (family guard) |
+| Case/whitespace: `2001:DB8::/32`, trailing commas, surrounding spaces, `::FFFF:172.20.0.4` | handled correctly |
+| `isIP` quirks the parser relies on, cross-checked against `node:net` (leading-zero octets → 0, trailing-space → 0) | consistent |
+
+**Test-discrimination probes — every new test was broken and went red (then restored byte-identical, then green):**
+
+| Probe | Tamper | Result |
+|---|---|---|
+| L1 | `authLimiter limit` → `1000` | **4/4 signup-rate-limit tests fail** (`expected 403 to be 429`, `'1000;w=900' to be '30;w=900'`) — the budget assertions discriminate |
+| L2 | `isPeerTrusted` CIDR branch disabled (`if (false && …)`) | **6/34 client-ip tests fail** — the F4 CIDR tests genuinely assert the CIDR path |
+| L3 | module-load line → `emptyTrustedPeerSet()` (STATE.md's honest B7 gap) | **153/153 unit + 101/101 integration still green** — confirmed: the belt-and-braces "set env before import" test is genuinely absent; the boot-log count is the only observer. Honest claim; unchanged. |
+
+### B. Findings this round
+
+#### B8. Non-blocking — `/0` and `::/0` are accepted and silently trust every peer
+
+`0.0.0.0/0` and `::/0` parse into a mask of `0` (`base = 0`), so `isPeerTrusted` returns true for every peer of that family — the exact "trusts too much" the CIDR arithmetic warning anticipated. It is **not** a violation of the safety property (the key must be explicitly set to opt in; unset is still gate-off), and it is a legitimate network engineering value (a Cloudflare egress range the operator genuinely can't enumerate). But it silently re-opens the spoofing hole the gate exists to close while *reporting as armed* (`trustedCloudflarePeerCount` = 1), and the F3 mismatch warn never fires because there is no "mismatch". **Recommendation (not blocking):** reject `/0` (or more generally any entry whose prefix ≤ some floor) at boot in the same F2 stance, or at minimum document in `.env.example`/`DEPLOY.md` that a `/0` trusts every peer. Decision for the reviewer.
+
+#### B9. Minor — the F2 boot error echoes the raw entry verbatim; a newline splits the log line
+
+`invalidEntry` (`trusted-peers.ts:169`) interpolates the *original* entry string into the thrown message, and `config.ts` wraps it into `Invalid environment configuration:`. A value containing `\n` (proven with `"172.20.0.4;\n\"INJECTED\"\n123"`) produces a multi-line log at boot. This is boot-time, one-shot, and the value is operator-set (not attacker-reachable over the network), so it is hygiene, not a hole. Note the F3 mismatch warn deliberately logs only `{ peer }` and never the attacker-controlled header value — that vector is clean (verified: the header values from my hammering never appear in the logs). Could strip control characters from the echoed entry; optional.
+
+#### B10. Minor — host bits set in a CIDR silently widen trust
+
+`172.20.0.5/16` is accepted and normalizes to `172.20.0.0/16` rather than erroring. Standard CIDR behaviour (the F4 report itself frames it as "normalizes, errors, or matches nothing" — it normalizes), but the failure mode is the *opposite* of F2's: a typo that widens rather than disables. The F3 warn won't catch it (the peer is inside the widened range). Not blocking; consider whether F2's "refuse on a bad value" stance should also flag host bits set. Operator-intent ambiguity; flagging for completeness.
+
+**F1 — symmetry, both directions:** direction 1 (config `::ffff:172.21.0.1`, socket peer arrives plain `172.21.0.1`) **proven live**: with the mapped-form entry armed, two requests with the same `CF-Connecting-IP` shared a bucket (`29 → 28`) and a different header got a fresh bucket (`29`) — the header was honoured, so the mapped entry matched the plain peer. Direction 2 (plain config, mapped socket peer) is covered by the unit test `client-ip.test.ts` "matches a peer configured in plain form against an IPv4-mapped socket peer"; I could not force a mapped-form socket peer over real HTTP on this deployment (see C).
+
+**F2 — invalid entries refuse to boot, in the container:** set `TRUSTED_CLOUDFLARE_PEERS="172.20.0.4, cloudflared"`, `docker compose up --force-recreate backend` → container **crash-loops** (`restart: unless-stopped`), never serves, with `Error: Invalid environment configuration: - TRUSTED_CLOUDFLARE_PEERS: entry 2 ("cloudflared"): "cloudflared" is not a valid IPv4 or IPv6 address…`. Position and fix named. B9 above covers the junk-value case. Empty/unset both boot clean (verified: `trustedCloudflarePeers:0` log line, no validation error).
+
+**F3 — the warn is useful and does not spam, verified live:**
+
+| Scenario | Probe | Result |
+|---|---|---|
+| Set empty (normal state) | 5+ logins each with a forged `CF-Connecting-IP` | **0 warn lines** in `docker compose logs` |
+| Set armed, peer not in it | 50 logins, each with a distinct forged valid header | **exactly 1 warn line**, `{ peer: "172.21.0.1" }`, header values absent |
+| Startup log | boots with empty, one literal, CIDR, and mixed sets | `trustedCloudflarePeers: 0 / 1 / 1 / 3` — count only, never addresses |
+| Mismatch warn condition | armed with `203.0.113.10`, peer `172.21.0.1` | fires once per process; a malformed header value also triggers it (code path `gateArmed && headerArrived && peer !== undefined`) |
+
+**F4 — CIDR live:** armed `172.21.0.0/16` (the Docker bridge network the host connects through), the header was honoured from the in-range peer (`29 → 28` same header, `29` different) — same result as a literal entry. Boot log showed count 1.
+
+**F5 — seam semantics:** `resetRateLimits()` (`security.ts:52`) restores `emptyTrustedPeerSet()` and resets `warnedPeerMismatch`; `setTrustedCloudflarePeers` sets the set and resets the warn flag; the harness's `resetDatabase()` calls `resetRateLimits()` (`harness.ts:60`), and the trusted-path integration test re-arms after each reset — the seam does what its name says and cannot leak trust across the single-fork suite. `resetRateLimits` has **no production caller** (grep of `src/`), so the module-load line (`security.ts:75-77`) is genuinely the only config-derived population, and F3's startup count is the only observer of it — consistent with STATE.md's B7 note.
+
+**Thresholds re-proven live against a freshly rebuilt container** (`--force-recreate` clears the in-memory store between runs): `AUTH_RATE_LIMIT=15` → `401 ×15, 429` (16th is 429) ✅; unset → `401 ×30, 429` exactly one 429 at position 31 ✅. These were the round-3 `[manual]` rows; they hold unchanged under the hardening code.
+
+**Default-posture evasion probe (the safety property, end to end):** with the key unset, 40 logins each carrying a distinct forged `CF-Connecting-IP: 203.0.113.<N>` → `401 ×30, then 429`, first 429 at **31**. All 40 share one bucket; rotating the header cannot evade the budget. The gate was not weakened by F1–F5.
+
+**STATE.md ledger claims:** every claim in the updated rows (B5 footguns fixed, B7 "single-line and observable", F1–F5 summary) is true while this work is uncommitted, with one wording note: STATE.md:5 says the pass "**shipped** 2026-08-13" — it is not committed yet (reviewer's step). The ledger rides the same commit per the loop convention, so it becomes true on commit; flagging the wording, not blocking. The B7 "remaining gap" line is verified accurate (L3).
+
+### C. What I could not verify
+
+- **F1 direction 2 live** (config entry in plain form, socket peer arriving as the `::ffff:`-mapped form): this deployment's Docker bridge presents the host as plain `172.21.0.1`, so I could not manufacture a mapped-form socket peer over real HTTP. Covered by the unit test both-ways pair; the direction that matters in practice (operator copies the mapped form out of a log) was proven live.
+- **A real Cloudflare Tunnel** — the trusted-peer path was exercised with the Docker bridge gateway as the trusted peer and the mapped/CIDR forms; a genuine cloudflared → Express hop (and Cloudflare's own header stamping) is only provable on a real tunnel. Carried forward to D.
+- **`pnpm build` and the e2e suite** — not part of the hardening gate; not run.
+- **The 15-min window expiry and MemoryStore semantics** — express-rate-limit's own, unchanged; not re-probed.
+- **A /0 entry's actual operator intent** (B8) — cannot be resolved locally; needs a human decision on whether to reject it at boot.
+
+### D. `[manual]` checks — for the human
+
+| # | Check | Command / what a pass looks like | Result |
+|---|---|---|---|
+| 1 | Value crosses the container boundary (raise budget) | `AUTH_RATE_LIMIT=15`, recreate, 16 wrong-password logins → 16th is 429 | ✅ **DONE (tester, 2026-08-13): `401 ×15, 429`** |
+| 2 | New default is live | unset, recreate, 31 wrong-password logins → 31st is 429 | ✅ **DONE (tester, 2026-08-13): `401 ×30, 429`** |
+| 3 | Clean boot, no validation warnings | `docker compose logs backend` after both boots | ✅ **DONE (tester, 2026-08-13): no ERR_ERL_*/trust-proxy/config errors; `trustedCloudflarePeers:0` logged** |
+| 4 | **Real Cloudflare Tunnel, literal peer** | set `TRUSTED_CLOUDFLARE_PEERS` to the address the backend sees from cloudflared, recreate → boot log shows count 1; distinct visitors get distinct auth buckets; a forged `CF-Connecting-IP` from a direct (non-tunnel) connection still cannot | 🕐 human — needs a real tunnel |
+| 5 | **Real Cloudflare Tunnel, CIDR peer + mismatch warn** | set a CIDR covering the tunnel network → count 1 in boot log; then break it (wrong form / decayed address after a renumber) → the **once-only** mismatch warn fires with the observed peer | 🕐 human — needs a real tunnel |
+| 6 | (B8 decision) reject `/0` at boot, or document it | reviewer/human decision on whether `0.0.0.0/0` / `::/0` should be a startup error | ✅ **RESOLVED (2026-08-13): rejected at boot — implemented and live-verified (see Round 5).** |
+
+---
+
+## Round 5 (2026-08-13) — tester, B8/B9/B10 fixes from the round-4 addendum
+
+Round 4 raised B8 (a `/0` silently trusts every peer), B9 (the boot error interpolates the raw entry, so a newline splits the log line) and B10 (a CIDR with host bits set silently widens trust). Round 5 fixes exactly those three and nothing else. I tried to make the fix's own advice false, over-rejected a valid form, split a log line, and broke each new test. **No BLOCKING findings.** Every corrected value the boot error suggests round-trips: it boots, the gate arms, and it covers exactly the network the operator meant. The safety property is unweakened.
+
+### A. Structural verification this round
+
+- Gates re-run from the implementer's uncommitted tree: `pnpm lint && pnpm typecheck && pnpm test` → **161 unit (16 files)**; `pnpm test:integration` → **101 (19 files)**; `docker compose config` grep "is not set" → **0**. Counts match the report exactly.
+- **`docker compose up -d --build`** (not just `--force-recreate`): the first live probe silently used a **stale image** — `172.21.0.1/16` booted with `trustedCloudflarePeers:1` instead of refusing, because the running container predated the B8/B10 code. After `--build` the same value **refuses to boot** (see B-fixes below). A tester methodology note, not a code defect: all live numbers in this round come from the rebuilt image.
+- Working tree after all probes is byte-identical to the implementer's state — 12 files hash-verified (11 modified + `trusted-peers.ts` untracked), plus the untracked `phase-8-cf-peer-hardening.md`. Verified repeatedly via `git status --short` and SHA-256.
+
+### B. Fixes verified — the message's own advice round-trips
+
+**B10 (host bits) — the highest-value probe, both directions:**
+
+- **Module battery (148 checks, 0 failures)** against an independent byte-based CIDR reference (no bigint masks — deliberately different arithmetic): for each rejected entry, the message's suggested network form re-parses, is on its own network boundary, is stable (re-parsing it does not produce another host-bits error), covers the originally-rejected address, and does **not** over-cover a one-bit-outside neighbor. The suggested single-address form (`<addr>/<maxprefix>`) also re-parses and is exact. Verified for `172.20.0.5/16`, `/24`, mid-byte `/17`; IPv6 `/64` (trailing zero run), `/64` with leading-zero input groups, mid-byte `/33` and `/17`, `/80` (internal zero run), and an all-zero base.
+- **Fuzz (21,011 checks, 0 failures):** 2000 random IPv4 + 2000 random IPv6 rejected entries; the suggested network form is always **canonical** (`bigintToIpv4`/`bigintToIpv6` output re-parses to the same base) — including mid-byte prefixes (`/17`, `/33`, `/65`), where the `::`-compression round-trip is easy to get wrong. Embedded-IPv4 forms (`2001:db8::192.0.2.5/120`) are refused with "use the plain IPv4 CIDR form" — the doc comment's promise, verified.
+- **Live in the rebuilt container:** `TRUSTED_CLOUDFLARE_PEERS=172.21.0.1/16` → **refuses to boot**, error names both corrected forms (`use "172.21.0.0/16" to trust the network, or "172.21.0.1/32" to trust only that address`). Feeding the message's own suggestion `172.21.0.0/16` in → **boots, `trustedCloudflarePeers:1`, listening**, and **40 distinct forged `CF-Connecting-IP` values from the in-range gateway peer (172.21.0.0/16 covers 172.21.0.1) → 0×429** — per-value buckets, i.e. the gate is armed, not merely parsed. The IPv6 suggestion (`2001:db8::/64`) also boots with count 1.
+
+**B8 (/0):** `0.0.0.0/0` and `::/0` both refuse to boot with the "would trust every IPv4/IPv6 peer" message. The prefix-zero check precedes the mask arithmetic, so a `/0` can never reach a host-bits state.
+
+**B9 (log-line hygiene):**
+
+- **Module battery (22 checks, 0 failures):** exactly 60 chars → not truncated, fully present; 61 chars → capped to 60 + `…`; a `"` and `\` → escaped (`\"`, `\\`); all-control-chars → NUL becomes `\u0000`; newline mid-string and at the end → escaped to `\n` literal, **no raw control character survives in any message**; a 5000-char entry yields a <400-char message. The message contains the offending entry, its position, and static help text — nothing else (no other config keys).
+- **Live:** a `TRUSTED_CLOUDFLARE_PEERS` value containing `\n"INJECTED"\n` produces **one physical log record** with the newline escaped; the 61-char entry is capped in the container too. The escaping cannot itself produce a broken line (JSON.stringify never emits a raw control char; the cap is applied before escaping so no escape sequence is cut in half).
+
+### Over-rejection — the new validation breaks nothing that worked
+
+All verified live against the rebuilt container (each arming a distinct form and getting **0×429** over 40 distinct forged headers, which means the header was honoured → the form matched the gateway peer):
+
+| Form | Result |
+|---|---|
+| Plain literal `172.21.0.1` | parses, arms ✓ |
+| Mapped-form literal `::ffff:172.21.0.1` (F1 symmetry) | parses, arms ✓ |
+| Boundary CIDR `172.21.0.0/16` | parses, arms ✓ |
+| Single-address `/32` `172.21.0.1/32` | parses, arms ✓ |
+| `/128` / on-boundary IPv6 (`2001:db8::/32`, `::1/128`, `2001:db8::1/128`) | parse (module) ✓ |
+
+**One non-regression observation (round-4 scope, untouched by this diff):** a `::ffff:`-mapped CIDR (`::ffff:172.20.0.5/16`) refuses to boot with "use the plain IPv4 CIDR form" rather than collapsing — `normalizePeer` only collapses the mapped prefix when the remainder is a plain literal, and the mask breaks that. Round 4 already established this (`::ffff:172.20.0.0/16` refused to boot); it is fail-loud, tells the operator the fix, and this diff does not touch it.
+
+### B8 message quality (brief item 5)
+
+Confirmed: the `/0` message names the correct family ("every IPv6 peer" for `::/0`) but gives **IPv4-form examples for both families** (`"172.20.0.0/16" or "172.20.0.5/32"`). An IPv6 operator gets the correct *conceptual* fix (the tunnel's own address or network) and knows which family tripped, but must mentally translate to `2001:db8::/32` / `2001:db8::1/128`. Usable, not ideal. **Minor finding B11** — a family-aware example (or none) would serve an IPv6-only operator better. Non-blocking; the report's flagged assumption is accurate.
+
+### Regressions — the "no behavioural change" claim
+
+Verified in the diff, not the report: this round's delta touches `trusted-peers.ts` parsing/sanitization, the tests, and the docs; `clientIp`/`isPeerTrusted`/the limiters in `security.ts` are unchanged from round 4. End-to-end, all live against the rebuilt container:
+
+- **Gate-off default:** key unset, 40 distinct forged `CF-Connecting-IP` values → first 429 at request **31**, 10×429 total — one shared bucket, safety property intact.
+- **F3 warn:** armed with a non-matching peer (`203.0.113.10`) → **exactly 1** warn line, carrying only the observed peer (`172.21.0.1`), header values absent; the bucket stays shared (10×429) so a mismatch fails closed. Empty set + header present ×5 → **0** warn lines.
+- **Thresholds:** `AUTH_RATE_LIMIT=15` → first 429 at **16**; unset → first 429 at **31** (`--force-recreate` clears the in-memory store between runs).
+- **F5 seam:** `resetRateLimits()` restores the **empty** set (doc comment updated to match); the integration test re-arms after each `beforeEach` reset. Verified by reading the diff and the passing suite.
+
+### Test discrimination — all 8 new tests genuinely fail against pre-fix code
+
+The 8 new tests (client-ip +6, config-defaults +2). I reverted each guard, confirmed red, restored byte-identical, re-ran green:
+
+| Probe | Tamper | Result |
+|---|---|---|
+| R1 | remove the B8 `prefix === 0` throw | "refuses a /0 prefix in either family" **red** (1 failed) |
+| R2 | remove the B10 host-bits throw (silent normalize) | "refuses an IPv4 CIDR … host bits" **and** "refuses an IPv6 CIDR … host bits" **red** (2 failed) |
+| R3 | `sanitizeEntry` → raw identity | "escapes a newline" **and** "caps an over-long entry" **red** (2 failed) |
+| R4 | remove the config boot-guard call in `loadConfig` | config-defaults **4 red** (malformed, `/33`, `/0`, host-bits) — includes both round-5 boot tests |
+
+The 8th test — "still accepts a CIDR entry already on its network boundary" — is a **no-over-rejection guard**: it passes against both the fix and the pre-fix code, which is exactly its job (it fails only if a future change over-rejects). So **7 of the 8 new tests go red on pre-fix code; the boundary test is the intentional exception**. Matches the report's "7 pre-fix failures across the 8 new tests". After every restore, the source files were hash-identical to the pre-probe state and the full gate re-ran green (161 + 101).
+
+### Hygiene
+
+- **No new dependency** (package.json/pnpm-lock/pnpm-workspace diff empty); **no migration** (`drizzle/` untouched); `trusted-peers.ts` imports only `node:net`.
+- **Deferred items still absent:** no `ADMIN_EMAILS`/`requireAdmin` (grep of `src/`), no screenshot-pruning code, no email-keyed limiter. Playwright imports confined to `src/automation/*`.
+- **`.env.example` ↔ `config.ts` ↔ compose:** all 16 config.ts keys appear in `.env.example` and all 16 reach the container environment; both compose files render clean (0 "is not set"), prod overlay keeps `NODE_ENV=production`, `APP_URL` placeholder, empty passthroughs.
+- **STATE.md ledger:** every round-5 claim is true while uncommitted (B8/B10 refusals live, B9 single-line live, DEPLOY.md's two correct forms, F5/B7 "single-line and observable" note verified — the env-before-import test is genuinely still unwritten). One wording note carried forward from round 4: STATE.md:5 says the pass "shipped 2026-08-13" — it is not committed yet; the ledger rides the same commit per loop convention, so it becomes true on commit. Non-blocking.
+
+### Findings this round
+
+- **B11 (minor, non-blocking):** the `/0` refusal gives IPv4-form examples for both families; an IPv6 operator is told the concept and the family but must translate the example. Family-aware examples would be strictly better. The report flagged this assumption accurately.
+- **No over-rejection found.** The safety property, all thresholds, the F3 warn, and the gate-off default were re-proven live against a freshly built image. **No BLOCKING findings.**
+
+### C. What I could not verify
+
+- **A real Cloudflare Tunnel** — the trusted-peer path was exercised with the Docker bridge gateway as the trusted peer (literal, mapped, `/32`, CIDR). A genuine cloudflared → Express hop and Cloudflare's own header stamping are only provable on a real tunnel. Carried forward to D.
+- **F1 direction 2 live** (plain config entry, mapped-form socket peer) — the Docker bridge presents the host as plain `172.21.0.1`; covered by the round-4 unit test pair.
+- **The long-window (15 min) bucket expiry** and MemoryStore semantics — express-rate-limit's own, unchanged, not re-probed.
+- **`pnpm build` and the e2e suite** — not part of this hardening gate; not run.
+- **A `/0` in an actual network with only IPv6 peers** — the conceptual fix is verified; a live IPv6-only tunnel is a `[manual]` item.
+
+### D. `[manual]` checks — for the human
+
+| # | Check | Command / what a pass looks like | Result |
+|---|---|---|---|
+| 1 | Value crosses the container boundary (raise budget) | `AUTH_RATE_LIMIT=15`, recreate, 16 wrong-password logins → 16th is 429 | ✅ **DONE (tester, 2026-08-13): first 429 at 16** |
+| 2 | New default is live | unset, recreate, 31 wrong-password logins → 31st is 429 | ✅ **DONE (tester, 2026-08-13): first 429 at 31** |
+| 3 | Clean boot, no validation warnings | `docker compose logs backend` after both boots | ✅ **DONE (tester, 2026-08-13): no ERR_ERL_*/trust-proxy/config errors; `trustedCloudflarePeers:0` logged** |
+| 4 | **Real Cloudflare Tunnel, literal or CIDR peer** | set `TRUSTED_CLOUDFLARE_PEERS` to the address/network the backend sees from cloudflared, recreate → count 1; distinct visitors get distinct auth buckets; a forged header from a direct connection still cannot | 🕐 human — needs a real tunnel |
+| 5 | **Real Cloudflare Tunnel, decayed value + mismatch warn** | break the value (wrong form / address after a renumber) → the **once-only** mismatch warn fires with the observed peer | 🕐 human — needs a real tunnel |
+| 6 | **IPv6-only tunnel end-to-end** | a tunnel whose peer is genuinely IPv6, arming via a `::/…` CIDR, verifying the suggestion round-trip that B11's family-agnostic message implies | 🕐 human — needs a real tunnel |
+

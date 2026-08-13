@@ -1,6 +1,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { config } from "../../src/config";
-import { setTrustedCloudflarePeers } from "../../src/middleware/security";
+import {
+  parseTrustedCloudflarePeers,
+  setTrustedCloudflarePeers,
+} from "../../src/middleware/security";
 import {
   closeTestServer,
   request,
@@ -104,9 +107,10 @@ describe("signup brute-force probing", () => {
   // trusted Cloudflare tunnel peer, CF-Connecting-IP is honoured, so different
   // values get different buckets — the property that motivated the header in
   // the first place. The harness's beforeEach resetDatabase() also resets the
-  // trusted-peer set to empty, so this test's trust is scoped to itself.
+  // trusted-peer set to the empty default (resetRateLimits), so this test's
+  // trust is scoped to itself and must be re-applied after each reset.
   it("auth budget honours CF-Connecting-IP from a trusted tunnel peer: different clients do not share a bucket, the same client does", async () => {
-    setTrustedCloudflarePeers(new Set(["127.0.0.1"]));
+    setTrustedCloudflarePeers(parseTrustedCloudflarePeers("127.0.0.1"));
     const alice = "198.51.100.10";
     const bob = "198.51.100.20";
     const signup = (ip: string, i: number) =>

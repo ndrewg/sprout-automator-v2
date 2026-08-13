@@ -3,6 +3,21 @@ import helmet from "helmet";
 import { rateLimit, MemoryStore } from "express-rate-limit";
 import type { Request } from "express";
 import { config } from "../config";
+import { logger } from "../lib/logger";
+import {
+  emptyTrustedPeerSet,
+  isPeerTrusted,
+  normalizePeer,
+  parseTrustedCloudflarePeers,
+} from "../lib/trusted-peers";
+import type { TrustedPeerSet } from "../lib/trusted-peers";
+
+export {
+  emptyTrustedPeerSet,
+  isPeerTrusted,
+  normalizePeer,
+  parseTrustedCloudflarePeers,
+};
 
 // The ONLY module that imports helmet / express-rate-limit (§03 module ownership).
 
@@ -17,13 +32,16 @@ const notificationsTestLimiterStore = new MemoryStore();
 
 /**
  * Clears every in-memory rate-limit store and restores the trusted-peer set to
- * its configured default. Called by the integration harness's per-test reset
- * alongside resetDatabase(): authLimiter is config.AUTH_RATE_LIMIT /15min per
- * client and the integration project runs single-fork, so a suite that
- * legitimately issues more auth requests than the budget (e.g. password-reset)
- * would starve itself and every later file without a reset. The trusted-peer
- * set is the same kind of shared module state — a test that enables a tunnel
- * peer for one test must not leak it into the rest of the suite.
+ * the EMPTY default (the gate OFF). Called by the integration harness's
+ * per-test reset alongside resetDatabase(): authLimiter is
+ * config.AUTH_RATE_LIMIT /15min per client and the integration project runs
+ * single-fork, so a suite that legitimately issues more auth requests than the
+ * budget (e.g. password-reset) would starve itself and every later file
+ * without a reset. The trusted-peer set is the same kind of shared module
+ * state — a test that enables a tunnel peer for one test must not leak it into
+ * the rest of the suite, so a reset restores the empty set (NOT a re-read of
+ * config) and a test must re-apply its setTrustedCloudflarePeers override
+ * after each reset.
  * Deliberately NOT a NODE_ENV==="test" bypass — that would leave the guard
  * unexercised in the one place it is enforced.
  */
@@ -31,33 +49,15 @@ export async function resetRateLimits(): Promise<void> {
   await authLimiterStore.resetAll();
   await apiLimiterStore.resetAll();
   await notificationsTestLimiterStore.resetAll();
-  trustedCloudflarePeers = parseTrustedCloudflarePeers(
-    config.TRUSTED_CLOUDFLARE_PEERS,
-  );
-}
-
-/**
- * Parses the TRUSTED_CLOUDFLARE_PEERS env list ("a, b, c") into a peer set,
- * dropping empty entries. Unset or empty → the empty set, which is the gate
- * being OFF: CF-Connecting-IP is then never honoured and every request keys on
- * req.ip. Exported only so the unit tests can pin the parse (the empty-string
- * Compose form must behave exactly like an unset variable).
- */
-export function parseTrustedCloudflarePeers(
-  raw: string | undefined,
-): ReadonlySet<string> {
-  if (raw === undefined) return new Set();
-  const peers = new Set<string>();
-  for (const part of raw.split(",")) {
-    const peer = part.trim();
-    if (peer !== "") peers.add(peer);
-  }
-  return peers;
+  trustedCloudflarePeers = emptyTrustedPeerSet();
+  warnedPeerMismatch = false;
 }
 
 /**
  * The socket peer addresses from which a CF-Connecting-IP header is accepted,
- * derived from the TRUSTED_CLOUDFLARE_PEERS config key (comma-separated).
+ * derived from the TRUSTED_CLOUDFLARE_PEERS config key (comma-separated IPv4/
+ * IPv6 literals and CIDR ranges — parsing lives in lib/trusted-peers.ts, which
+ * also refuses a malformed entry at boot).
  * A real Cloudflare Tunnel (client → CF edge → cloudflared → Express) is the
  * ONLY channel on which that header is set by Cloudflare itself, so it is only
  * honoured when the request's immediate peer (req.socket.remoteAddress) is one
@@ -72,23 +72,30 @@ export function parseTrustedCloudflarePeers(
  * address would re-open the spoofing hole this gate closes. Only a peer that
  * genuinely terminates a Cloudflare tunnel may be added.
  */
-let trustedCloudflarePeers: ReadonlySet<string> = parseTrustedCloudflarePeers(
+let trustedCloudflarePeers: TrustedPeerSet = parseTrustedCloudflarePeers(
   config.TRUSTED_CLOUDFLARE_PEERS,
 );
 
+/** Once-only mismatch warn (F3): a CF-Connecting-IP from a peer outside a
+ * non-empty trusted set is the signature of F1/F2/F4 — a misconfiguration that
+ * would otherwise be silent. Warn once so a hostile client cannot flood the
+ * log. */
+let warnedPeerMismatch = false;
+
 /**
  * Test seam (mirrors resetRateLimits): replace the trusted-peer set so the
- * trusted-tunnel path can be exercised, and restore the empty default
- * afterwards. Production never calls this — there is no tunnel to trust.
+ * trusted-tunnel path can be exercised. A later resetRateLimits() restores the
+ * EMPTY set, so a test must re-apply its override after each reset.
  */
-export function setTrustedCloudflarePeers(peers: ReadonlySet<string>): void {
+export function setTrustedCloudflarePeers(peers: TrustedPeerSet): void {
   trustedCloudflarePeers = peers;
+  warnedPeerMismatch = false;
 }
 
-/** Strips the IPv4-mapped IPv6 prefix so a dual-stack peer ("::ffff:127.0.0.1")
- * matches the plain form in trustedCloudflarePeers. */
-function normalizePeer(peer: string | undefined): string | undefined {
-  return peer?.startsWith("::ffff:") ? peer.slice("::ffff:".length) : peer;
+/** Size of the trusted-peer set (literals + ranges) for the startup log —
+ * never the addresses, which are not secret but are not needed at info. */
+export function trustedCloudflarePeerCount(): number {
+  return trustedCloudflarePeers.literals.size + trustedCloudflarePeers.cidrs.length;
 }
 
 /**
@@ -118,11 +125,31 @@ function normalizePeer(peer: string | undefined): string | undefined {
  */
 export function clientIp(req: Request): string {
   const peer = normalizePeer(req.socket.remoteAddress);
-  if (peer !== undefined && trustedCloudflarePeers.has(peer)) {
-    const raw = req.headers["cf-connecting-ip"];
-    const value = (Array.isArray(raw) ? raw[0] : raw)?.trim();
+  const gateArmed =
+    trustedCloudflarePeers.literals.size + trustedCloudflarePeers.cidrs.length >
+    0;
+  const peerTrusted =
+    gateArmed &&
+    peer !== undefined &&
+    isPeerTrusted(trustedCloudflarePeers, peer);
+  const raw = req.headers["cf-connecting-ip"];
+  const value = (Array.isArray(raw) ? raw[0] : raw)?.trim();
+  const headerArrived = value !== undefined && value !== "";
+  if (peerTrusted) {
     if (value !== undefined && isIP(value) !== 0) {
       return value;
+    }
+  } else if (gateArmed && headerArrived && peer !== undefined) {
+    // A CF-Connecting-IP arrived from a peer outside a NON-EMPTY trusted set —
+    // the exact signature of a misconfigured gate (F1/F2/F4), which would
+    // otherwise be silent. Warn once, naming the observed peer. When the set
+    // is empty (the normal state) this never fires.
+    if (!warnedPeerMismatch) {
+      warnedPeerMismatch = true;
+      logger.warn(
+        { peer },
+        "CF-Connecting-IP header arrived from a peer outside TRUSTED_CLOUDFLARE_PEERS — ignoring the header. Fix the config or the header will be ignored.",
+      );
     }
   }
   return req.ip ?? req.socket.remoteAddress ?? "unknown";

@@ -173,16 +173,37 @@ morning's password fumbling locks the whole team out.
 guessing):
 
 ```ini
-TRUSTED_CLOUDFLARE_PEERS=<address the backend sees from cloudflared>
+# Prefer the CIDR form: a bare container address decays when Docker renumbers
+# the network (--force-recreate reassigns IPs), and the gate then stops
+# matching until you fix it. A range must name the network, not an address
+# inside it; a single address takes its full mask.
+TRUSTED_CLOUDFLARE_PEERS=172.20.0.0/16   # the whole Docker network
+# TRUSTED_CLOUDFLARE_PEERS=172.20.0.5/32 # exactly one address
 ```
 
-Find that address from inside the network, e.g.
+Entries are IPv4/IPv6 literals or CIDR ranges, comma-separated. Find the
+network from inside the stack, e.g.
 `docker inspect <cloudflared-container> --format '{{.NetworkSettings.Networks.sprout-net.IPAddress}}'`
 (or the host IP if the connector runs outside compose). **Do not** list Caddy's
 address — Caddy forwards a client-supplied `CF-Connecting-IP` verbatim, so
 trusting it re-opens the spoofing hole. Leaving the key empty is correct until
 a tunnel exists: the limiter falls back to `req.ip`, which behind the
 base-compose direct exposure is the real client already.
+
+A malformed entry (typo, stray quote, `cloudflared`, `172.20..4`) **refuses to
+boot** naming the offending position. So do two plausible-looking CIDR forms:
+a `/0` prefix (`0.0.0.0/0`, `::/0`) — its mask is zero, so it would trust
+**every peer** and re-open the spoofing hole while reporting as armed — and a
+range whose address has host bits set: `172.20.0.5/16` refuses to boot instead
+of silently trusting the whole `172.20.0.0/16` (a log-line copy of an address
+plus a mask would otherwise trust 65k addresses believing it trusted one). The
+error names the corrected value; the two correct forms are the network
+(`172.20.0.0/16`) or the single address with its full mask (`172.20.0.5/32`).
+And once the gate is armed, a
+`CF-Connecting-IP` arriving from a peer outside the set logs a **one-time
+mismatch warning with the observed peer address** — that warning is how you
+notice a decayed value or a wrong form after a container renumber. It never
+fires while the key is empty.
 
 ---
 
