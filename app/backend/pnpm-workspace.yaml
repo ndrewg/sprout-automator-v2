@@ -10,3 +10,16 @@ allowBuilds:
   esbuild: true                  # tsx's engine downloads its platform binary
   '@node-rs/argon2': true        # native napi binary
   playwright: true               # browser download hook (no-op on the PW base image)
+
+# Transitive advisories with no upstream fix (checked 2026-08-24). Scoped to the
+# declaring edge so no other consumer's range is violated.
+overrides:
+  # @esbuild-kit/core-utils (drizzle-kit's TS-config loader, deprecated +
+  # unmaintained) pins esbuild ~0.18.20 — GHSA-67mh-4wv8-2f99 (esbuild
+  # <=0.24.2). esbuild's JS transform API is stable across 0.18 -> 0.28, and
+  # 0.28.1 is already the version tsx/vite resolve. DevDependency-only path.
+  "esbuild@~0.18.20": "0.28.1"
+  # mailparser pins html-to-text 10.0.0 exactly, whose deepmerge-ts ^7.1.5 is
+  # GHSA-ggr8-5vv4-36mx (fixed in deepmerge-ts >=8.0.0). 10.0.1 is the patch
+  # release that moves to deepmerge-ts ^8.0.1. Production path.
+  "html-to-text@10.0.0": "10.0.1"

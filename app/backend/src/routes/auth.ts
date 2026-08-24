@@ -22,6 +22,7 @@ import {
 import { requireAuth } from "../middleware/auth";
 import { unregisterSchedule } from "../services/scheduler";
 import { removeUserData } from "../lib/paths";
+import { isUniqueViolation } from "../lib/pg-errors";
 
 export const authRouter = Router();
 
@@ -81,15 +82,6 @@ function emailHash(email: string): string {
   // Non-reversible, truncated — for correlating failed logins without storing
   // the email itself.
   return createHash("sha256").update(email).digest("hex").slice(0, 16);
-}
-
-function isUniqueViolation(err: unknown): boolean {
-  return (
-    typeof err === "object" &&
-    err !== null &&
-    "code" in err &&
-    (err as { code?: unknown }).code === "23505"
-  );
 }
 
 function clientInfo(req: Request): { ip: string | null; userAgent: string | null } {

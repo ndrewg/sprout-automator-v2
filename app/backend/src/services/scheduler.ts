@@ -56,8 +56,11 @@ export function registerSchedule(row: Schedule): void {
 export function unregisterSchedule(userId: string): void {
   const tasks = active.get(userId);
   if (!tasks) return;
-  tasks.clockIn.stop();
-  tasks.clockOut.stop();
+  // node-cron v4 types stop() as void | Promise<void> (inline tasks — the ones
+  // this scheduler creates — return void at runtime); the union makes oxlint's
+  // no-floating-promises flag it, so mark the deliberate non-await explicitly.
+  void tasks.clockIn.stop();
+  void tasks.clockOut.stop();
   active.delete(userId);
   logger.info({ userId }, "schedule unregistered");
 }

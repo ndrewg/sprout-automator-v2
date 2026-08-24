@@ -12,21 +12,13 @@ import {
 } from "../automation/otp-bridge";
 import { createOtpAcquirer } from "./otp-acquisition";
 import { errorSummary, stripAnsi } from "../lib/text";
+import { isUniqueViolation } from "../lib/pg-errors";
 import { notifyRunFinished } from "./notifications";
 import type { ClockAction } from "../automation/clock";
 
 type StartRunResult =
   | { ok: true; run: Run }
   | { ok: false; reason: "no_credentials" | "already_running" };
-
-function isUniqueViolation(err: unknown): boolean {
-  return (
-    typeof err === "object" &&
-    err !== null &&
-    "code" in err &&
-    (err as { code?: unknown }).code === "23505"
-  );
-}
 
 export async function startRun(params: {
   userId: string;

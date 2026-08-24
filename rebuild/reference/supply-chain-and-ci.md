@@ -142,7 +142,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test          # vitest (the pure-fn tests)
-      - run: pnpm audit --audit-level=high
+      - run: pnpm audit --audit-level=high --prod   # blocking, prod-only
+      - run: pnpm audit --audit-level=high          # full tree, non-blocking
+        continue-on-error: true
   frontend:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: app/frontend } }
@@ -156,6 +158,18 @@ jobs:
 ```
 
 If you're not on GitHub, replicate the same four backend steps as a **pre-push git hook** so a broken typecheck/test never reaches the remote.
+
+### What the audit gate means (decision, 2026-08-24, phase 10)
+
+`pnpm audit` consults a **live** advisory database. A repository that compiled and tested clean yesterday fails today because someone published an advisory — no commit caused it. In August 2026 the backend job went red on 18 advisories with zero dependency changes, and nobody noticed because nobody had pushed. That is the trap: a permanently-red pipeline is one people stop reading.
+
+The deliberate decision (implemented in phase 10, recorded here so the next person to see a red pipeline knows the choice was made on purpose):
+
+- **`pnpm audit --audit-level=high --prod` is BLOCKING.** A high/critical advisory in a dependency the production image installs (`pnpm install --frozen-lockfile --prod`) reaches users — it fails the build, and someone must respond. This is the honest signal the gate exists for.
+- **The full-tree audit (`pnpm audit --audit-level=high`, devDependencies included) runs NON-BLOCKING** (`continue-on-error: true`) so tooling advisories stay visible on every run without red-ing the pipeline. Of the 18 findings that broke CI in 2026-08, 13 arrived through `vitest` — a devDependency the production image omits, including the lone "critical" (Vitest UI arbitrary file read, which additionally requires running Vitest UI, which this project never does). A gate that fails on tooling nobody deploys is mostly noise.
+- **Advisory-only (`continue-on-error` on the prod audit too) was rejected** — an advisory check is one nobody reads, which is exactly how the pipeline rotted in the first place.
+
+Phase 10 also cleared every advisory that a bump could clear: vitest 2.1 → 4.1 (the 13 devDep findings), drizzle-orm 0.36 → 0.45.2 + drizzle-kit 0.28 → 0.31 (the SQL-identifier injection HIGH), date-holidays 3.30 → 3.35, mailparser 3.9.11 → 3.9.15, imapflow 1.4 → 1.7, node-cron 3 → 4 (drops the vulnerable uuid), and two **scoped `overrides`** in `app/backend/pnpm-workspace.yaml` for transitives with no upstream fix (`esbuild@~0.18.20` → 0.28.1 through the deprecated `@esbuild-kit` chain that `drizzle-kit`'s config loader still uses; `html-to-text@10.0.0` → 10.0.1, whose `deepmerge-ts ^7.1.5` was the last prod finding). Both audits report **No known vulnerabilities found** today.
 
 ---
 

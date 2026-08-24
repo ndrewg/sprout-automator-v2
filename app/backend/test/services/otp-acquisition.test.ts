@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, type Mock } from "vitest";
 import {
   createOtpAcquirer,
   type OtpAcquirerDeps,
@@ -24,9 +24,9 @@ const IMAP_CREDS = { email: "otp-owner@example.com", appPassword: "app-pw-1234" 
 
 function makeFakeDeps(): {
   deps: OtpAcquirerDeps;
-  waitForOtp: ReturnType<typeof vi.fn>;
-  cancelWait: ReturnType<typeof vi.fn>;
-  pollForOtp: ReturnType<typeof vi.fn>;
+  waitForOtp: Mock<OtpAcquirerDeps["waitForOtp"]>;
+  cancelWait: Mock<OtpAcquirerDeps["cancelWait"]>;
+  pollForOtp: Mock<OtpAcquirerDeps["pollForOtp"]>;
 } {
   const waitForOtp = vi.fn<OtpAcquirerDeps["waitForOtp"]>(
     () => new Promise<string>(() => {}),
