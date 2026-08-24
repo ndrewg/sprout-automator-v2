@@ -55,7 +55,7 @@ export async function resetDatabase(): Promise<void> {
   await db.execute(sql`
     TRUNCATE users, runs, sessions, credentials, schedules, audit_log,
              notification_settings, missed_run_notices, holiday_skip_notices,
-             reset_tokens
+             gazette_holidays, reset_tokens
     RESTART IDENTITY CASCADE
   `);
   await resetRateLimits();

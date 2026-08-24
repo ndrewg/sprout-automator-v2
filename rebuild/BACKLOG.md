@@ -196,6 +196,8 @@ Minimum useful version: an admin-only delete that reuses the existing self-servi
 Phase 7's pause window is the workaround, but it requires the user to know in advance and act — which is what the automation was supposed to remove.
 
 > **Promoted to [`phases/phase-11-holiday-skip-types.md`](./phases/phase-11-holiday-skip-types.md) (the urgent filter fix) and [`phases/phase-13-holiday-sourcing.md`](./phases/phase-13-holiday-sourcing.md) (overrides + the Gazette layer), 2026-08-14 — and it is no longer theoretical: a real scheduled run clocked the operator in on a holiday.** Investigation found a bigger, closer defect sitting in front of this one: `lib/ph-holidays.ts:11` skips only `public` and `bank`, but `date-holidays` types Philippine **special (non-working) days** as `optional`, so **eight days in 2026** were treated as ordinary workdays — including **Ninoy Aquino Day, 2026-08-21**. Worse for the long run: the library gives Eid al-Fitr 2026 as a *computed* `2026-03-20`, while the Philippines proclaims Eid after the moon sighting, routinely a day either side — so when they disagree you get a skip on a working day **and** a clock-in on the real holiday. That is the case no bundled dataset can ever get right, and the reason the phase adds an Official Gazette layer that may only ever *add* a skip, never cancel one.
+>
+> **✅ CLOSED (code, 2026-08-24) — phase 13 shipped.** `EXTRA_HOLIDAYS` operator overrides + a nightly Official Gazette advisory cache (additive-only, cache-first, never on the critical path) cover proclamation days and the lunar-date disagreement. The `[manual]` proof (a real proclamation day + the next Eid) waits on the human; the code is committed and gated.
 
 ## 19. No frontend error boundary
 

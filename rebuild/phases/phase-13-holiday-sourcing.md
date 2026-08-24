@@ -94,3 +94,15 @@ Baselines: **161 backend unit / 106 backend integration** (plus whatever phase 1
 | 5 | Next Eid | The proclaimed date is the one that skips |
 
 Row 5 cannot be scheduled — note it and wait. Commit per the loop in `AGENTS.md`; tag `phase-13-complete` when the table is filled in.
+
+---
+
+> ⚠️ **As-built (found 2026-08-24):** design latitude resolved to **option (b)** — a new orchestrator `services/holidays.ts` (`resolveHolidayDecision(date)`) repoints the three call sites (scheduler `fireCron`, schedule route `todayInfo`, sweep `isWorkday`), and `lib/ph-holidays.ts` stays the pure library lookup (module ownership preserved). `date-holidays` is still imported ONLY in `lib/ph-holidays.ts`.
+>
+> ⚠️ **As-built (2026-08-24):** **no new HTML-parsing dependency** — the Gazette parser (`lib/gazette.ts`) is a built-in regex over the page text, with the URL hardcoded (`https://www.officialgazette.gov.ph/`, no config key). The scope heuristic is conservative: only an explicit national marker OR a lunar/Eid name yields `national`; everything else is `regional` or `ambiguous` (never inferred national from absence of a qualifier). Correctness against LIVE Gazette markup is `[manual]` (a real proclamation day).
+>
+> ⚠️ **As-built (2026-08-24):** the notify path (`notifyHolidaySkip`) keeps its backward-compatible signature — the 4th argument accepts either an options object `{ possible?, note? }` (phase 13) or a send function (phase 11's call sites). A `public` library holiday stays silent; `optional`, `override` and `gazette` skips all notify. The "possible holiday" (regional/ambiguous) notification is a separate render (`renderPossibleHolidayMessage`) that fires WITHOUT skipping, reusing the same `holiday_skip_notices` one-per-user-per-Manila-day idempotency.
+>
+> ⚠️ **As-built (2026-08-24):** `isWorkday` (sweep) is now `boolean | Promise<boolean>` and awaited — needed because the holiday decision reads the gazette DB cache (async). The missed-run sweep treats a "possible" (regional/ambiguous) holiday as still a workday (the run was expected to proceed).
+>
+> ⚠️ **As-built (2026-08-24):** lunar-disagreement matching is token-overlap (`services/holidays.ts` `namesMatch`), because the library names Eid "End of Ramadan (Eid al-Fitr)" while a proclamation names it "Eid'l Fitr" — exact-string matching would miss the disagreement. The disagreement is detected by probing ±5 days around the Gazette date for a same-named library holiday.

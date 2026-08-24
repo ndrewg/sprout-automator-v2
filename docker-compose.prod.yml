@@ -67,6 +67,7 @@ services:
       MISSED_RUN_GRACE_MINUTES: ${MISSED_RUN_GRACE_MINUTES:-}
       AUTH_RATE_LIMIT: ${AUTH_RATE_LIMIT:-}
       TRUSTED_CLOUDFLARE_PEERS: ${TRUSTED_CLOUDFLARE_PEERS:-}
+      EXTRA_HOLIDAYS: ${EXTRA_HOLIDAYS:-}
     # `!reset` EMPTIES the base file's ports list on merge instead of appending
     # to it — the backend stops publishing 3000 and only Caddy reaches it.
     ports: !reset []

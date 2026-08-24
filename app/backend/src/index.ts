@@ -6,6 +6,7 @@ import { app } from "./app";
 import { recoverOrphanedRuns, runQueue } from "./services/run-queue";
 import { executeQueuedRun } from "./services/runs";
 import { loadAllSchedules, startMissedRunSweep } from "./services/scheduler";
+import { startGazetteRefresh } from "./services/gazette";
 
 // Backstop for anything the run executor's .catch or the app's error handler
 // miss: log and keep serving. A scheduler that dies on an unrelated rejection
@@ -61,6 +62,11 @@ async function start(): Promise<void> {
   // One global sweep for ALL users — a missed run is invisible unless the
   // process that survived to report it reconciles it.
   startMissedRunSweep();
+
+  // Nightly Official Gazette refresh (cache-first advisory layer). Non-blocking:
+  // a cold cache degrades to the library, and a slow first fetch must not delay
+  // boot.
+  startGazetteRefresh();
 
   app.listen(config.PORT, "0.0.0.0", () => {
     logger.info(

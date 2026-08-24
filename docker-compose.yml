@@ -63,6 +63,7 @@ services:
       # problem, and the warning is the signal.
       APP_URL: ${APP_URL:-}
       AUTH_RATE_LIMIT: ${AUTH_RATE_LIMIT:-}
+      EXTRA_HOLIDAYS: ${EXTRA_HOLIDAYS:-}
       HEARTBEAT_URL: ${HEARTBEAT_URL:-}
       MAIL_FROM: ${MAIL_FROM:-}
       MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-}

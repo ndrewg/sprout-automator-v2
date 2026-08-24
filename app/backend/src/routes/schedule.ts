@@ -8,9 +8,9 @@ import { recordAudit } from "../lib/audit";
 import { registerSchedule, unregisterSchedule } from "../services/scheduler";
 import {
   isPausedOn,
-  isPhilippineHoliday,
   manilaDateString,
 } from "../lib/ph-holidays";
+import { resolveHolidayDecision } from "../services/holidays";
 
 export const scheduleRouter = Router();
 scheduleRouter.use(requireAuth);
@@ -32,17 +32,21 @@ type ScheduleView = {
   today: { date: string; holiday: string | null };
 };
 
-function todayInfo(): { date: string; holiday: string | null } {
+async function todayInfo(): Promise<{ date: string; holiday: string | null }> {
   const now = new Date();
+  const decision = await resolveHolidayDecision(now);
   return {
     date: manilaDateString(now),
-    // The frontend contract is a holiday name string; the enriched return type
-    // (name/type/source) is for the scheduler's branch-on-type, not this view.
-    holiday: isPhilippineHoliday(now)?.name ?? null,
+    // The frontend contract is a holiday name string; the richer decision
+    // (name/type/source + possible) is for the scheduler's branch-on-skip, not
+    // this view. A "possible" (regional) holiday still shows its name here so
+    // the operator can see why a working day was flagged.
+    holiday: decision.skip?.name ?? decision.possible?.name ?? null,
   };
 }
 
-function toView(row: Schedule | undefined): ScheduleView {
+async function toView(row: Schedule | undefined): Promise<ScheduleView> {
+  const today = await todayInfo();
   if (!row) {
     return {
       clockInTime: DEFAULT_IN,
@@ -53,7 +57,7 @@ function toView(row: Schedule | undefined): ScheduleView {
       pausedFrom: null,
       pausedUntil: null,
       pausedToday: false,
-      today: todayInfo(),
+      today,
     };
   }
   return {
@@ -65,7 +69,7 @@ function toView(row: Schedule | undefined): ScheduleView {
     pausedFrom: row.pausedFrom,
     pausedUntil: row.pausedUntil,
     pausedToday: isPausedOn(row),
-    today: todayInfo(),
+    today,
   };
 }
 
@@ -94,7 +98,7 @@ scheduleRouter.get("/", async (req: Request, res: Response) => {
     .from(schedules)
     .where(eq(schedules.userId, req.user!.id))
     .limit(1);
-  res.json({ schedule: toView(row) });
+  res.json({ schedule: await toView(row) });
 });
 
 scheduleRouter.put("/", async (req: Request, res: Response) => {
@@ -210,5 +214,5 @@ scheduleRouter.put("/", async (req: Request, res: Response) => {
     userAgent: req.get("user-agent") ?? null,
     metadata,
   });
-  res.json({ schedule: toView(row) });
+  res.json({ schedule: await toView(row) });
 });

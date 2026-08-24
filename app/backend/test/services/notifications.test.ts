@@ -294,14 +294,50 @@ describe("renderMissedMessage", () => {
 
 describe("renderHolidaySkipMessage", () => {
   it("names the holiday, says it is special non-working, and offers Clock in now", () => {
-    expect(renderHolidaySkipMessage("Ninoy Aquino Day", "2026-08-21")).toBe(
+    expect(
+      renderHolidaySkipMessage(
+        { name: "Ninoy Aquino Day", type: "optional", source: "library" },
+        "2026-08-21",
+      ),
+    ).toBe(
       "🏖️ <b>Ninoy Aquino Day</b> is a special non-working day today (Fri 21 Aug).\n" +
         "No clock was scheduled. Working after all? <b>Clock in now</b>.",
     );
   });
 
+  it("names the source for an operator override and a gazette proclamation", () => {
+    const override = renderHolidaySkipMessage(
+      { name: "Special Day", type: "public", source: "override" },
+      "2026-08-21",
+    );
+    expect(override).toContain("Special Day");
+    expect(override).toContain("operator override");
+    expect(override).toContain("Clock in now");
+
+    const gazette = renderHolidaySkipMessage(
+      { name: "Eid'l Fitr", type: "public", source: "gazette" },
+      "2026-08-21",
+    );
+    expect(gazette).toContain("Eid'l Fitr");
+    expect(gazette).toContain("Official Gazette proclamation");
+    expect(gazette).toContain("Clock in now");
+  });
+
+  it("appends a gazette disagreement note when one is supplied", () => {
+    const html = renderHolidaySkipMessage(
+      { name: "Eid'l Fitr", type: "public", source: "gazette" },
+      "2026-03-21",
+      "The bundled calendar placed Eid'l Fitr on 2026-03-20, but the Official Gazette proclaims 2026-03-21. The library's date looks wrong.",
+    );
+    expect(html).toContain("2026-03-20");
+    expect(html).toContain("looks wrong");
+  });
+
   it("escapes markup in a holiday name before inserting it into HTML", () => {
-    const html = renderHolidaySkipMessage("Feast <b>&</b>", "2026-08-21");
+    const html = renderHolidaySkipMessage(
+      { name: "Feast <b>&</b>", type: "optional", source: "library" },
+      "2026-08-21",
+    );
     expect(html).not.toContain("<b>Feast <b>");
     expect(html).toContain("Feast &lt;b&gt;&amp;&lt;/b&gt;");
   });

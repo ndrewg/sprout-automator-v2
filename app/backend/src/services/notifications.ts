@@ -15,7 +15,6 @@ import { recordAudit } from "../lib/audit";
 import { logger } from "../lib/logger";
 import {
   isPausedOn,
-  isPhilippineHoliday,
   manilaDateString,
   type HolidayInfo,
 } from "../lib/ph-holidays";
@@ -26,6 +25,7 @@ import {
   type TelegramSendResult,
 } from "../lib/telegram";
 import type { ClockAction } from "../automation/clock";
+import { resolveHolidayDecision } from "./holidays";
 
 // Policy for notifications. Deliberately HTTP-free (the transport lives in
 // lib/telegram.ts) and DB-aware (settings, blocked-count, the idempotency
@@ -142,15 +142,49 @@ export function renderMissedMessage(
 }
 
 /**
- * The "special non-working day" reminder (phase 11). Sent only for `optional`
- * holiday skips — a `public` holiday is silent. Tells the operator which day
- * it is and that the "Clock in now" button is there if they're working anyway.
+ * The "holiday skip" reminder (phase 11 + 13). Sent when the scheduler skips a
+ * run because of a holiday that ISN'T a plain `public` library holiday: an
+ * `optional` (special non-working day, phase 11), an operator `override`
+ * (phase 13A — always notifies, a human typed it), or a `gazette` proclamation
+ * (phase 13B). A `public` library holiday stays silent. The message names the
+ * day and that the "Clock in now" button is there if they're working anyway;
+ * override/gazette skips name their source, and an optional `note` (the Gazette
+ * lunar-date disagreement) is appended when present.
  */
-export function renderHolidaySkipMessage(name: string, dateStr: string): string {
+export function renderHolidaySkipMessage(
+  holiday: HolidayInfo,
+  dateStr: string,
+  note: string | null = null,
+): string {
+  const name = escapeHtml(holiday.name);
+  const day = formatManilaDay(dateStr);
+  let line: string;
+  if (holiday.source === "override") {
+    line = `🏖️ <b>${name}</b> is a holiday today (operator override) · ${day}`;
+  } else if (holiday.source === "gazette") {
+    line = `🏖️ <b>${name}</b> is a national holiday today (Official Gazette proclamation) · ${day}`;
+  } else {
+    line = `🏖️ <b>${name}</b> is a special non-working day today (${day})`;
+  }
+  const noteLine = note ? `\n${escapeHtml(note)}` : "";
+  return `${line}.\nNo clock was scheduled. Working after all? <b>Clock in now</b>.${noteLine}`;
+}
+
+/**
+ * The "possible holiday" reminder (phase 13B). Sent for a regional/ambiguous
+ * Gazette proclamation — we do NOT skip (the scheduler still runs), but the
+ * human is told so they can decide whether today is actually a holiday for them.
+ */
+export function renderPossibleHolidayMessage(
+  holiday: HolidayInfo,
+  dateStr: string,
+): string {
+  const name = escapeHtml(holiday.name);
+  const day = formatManilaDay(dateStr);
   return (
-    `🏖️ <b>${escapeHtml(name)}</b> is a special non-working day today ` +
-    `(${formatManilaDay(dateStr)}).\n` +
-    `No clock was scheduled. Working after all? <b>Clock in now</b>.`
+    `🔎 <b>Possible holiday</b> · ${day}\n` +
+    `${name} is listed in the Official Gazette for this date, but only for a ` +
+    `specific area. The scheduler ran as normal — check whether you're working.`
   );
 }
 
@@ -251,9 +285,10 @@ export async function notifyRunFinished(params: {
 }
 
 /**
- * The "special non-working day" reminder, called from fireCron when a holiday
- * skip happens. Distinct from the run-finished dispatch because there is NO
- * run row — fireCron returns before any runs insert.
+ * The holiday notification, called from fireCron on a holiday skip (or a
+ * "possible holiday" that does NOT skip). Distinct from the run-finished
+ * dispatch because there is NO run row — fireCron returns before any runs
+ * insert.
  *
  * Idempotent via the database (the same "let the database decide" pattern as
  * the missed-run notices): we insert a holiday_skip_notices row keyed on
@@ -261,21 +296,34 @@ export async function notifyRunFinished(params: {
  * `action` so the in/out cron fires of the same day produce ONE message, and a
  * container restart cannot duplicate it. No state is held in memory.
  *
- * A `public` holiday is silent — only `optional` (special non-working days)
- * notify, because those are the less-certain skips where a wrong guess costs
- * one click that morning.
+ * What fires (phase 11 + 13): an `optional` (special non-working day), an
+ * operator `override` (always), or a `gazette` proclamation. A `public`
+ * library holiday stays silent — nobody needs a Christmas Day message, and a
+ * channel that fires on every predictable holiday is a channel people mute.
  *
  * This is deliberately fire-and-forget (callers use `.catch(() => {})`): a dead
- * Telegram endpoint must not change the skip decision or delay anything
- * (hard rule 11). The `send` param is for tests.
+ * Telegram endpoint must not change the skip decision or delay anything (hard
+ * rule 11). The `send` param is for tests.
  */
 export async function notifyHolidaySkip(
   userId: string,
   holiday: HolidayInfo,
   now: Date,
+  optsOrSend?: { possible?: boolean; note?: string | null } | SendFn,
   send: SendFn = sendTelegramMessage,
 ): Promise<"sent" | "skipped"> {
-  if (holiday.type !== "optional") return "skipped";
+  // Backward-compatible: phase-11 callers passed `send` as the 4th arg. Accept
+  // either an options object (phase 13) or a send function there.
+  const opts =
+    typeof optsOrSend === "function" ? {} : (optsOrSend ?? {});
+  const actualSend = typeof optsOrSend === "function" ? optsOrSend : send;
+
+  // Silent ONLY for a plain `public` library holiday. Overrides and gazette
+  // skips always notify; `optional` (special non-working days) notify; a
+  // "possible" (regional/ambiguous gazette) notification always fires.
+  if (holiday.type !== "optional" && holiday.source === "library") {
+    return "skipped";
+  }
   const dateStr = manilaDateString(now);
 
   // The database decides who sends: onConflictDoNothing means a conflicting
@@ -290,8 +338,10 @@ export async function notifyHolidaySkip(
     .returning();
   if (inserted === undefined) return "skipped";
 
-  const html = renderHolidaySkipMessage(holiday.name, dateStr);
-  const outcome = await dispatch(userId, html, "holiday", send);
+  const html = opts.possible
+    ? renderPossibleHolidayMessage(holiday, dateStr)
+    : renderHolidaySkipMessage(holiday, dateStr, opts.note ?? null);
+  const outcome = await dispatch(userId, html, "holiday", actualSend);
   return outcome === "sent" ? "sent" : "skipped";
 }
 
@@ -317,7 +367,7 @@ export function expectedFireTime(dateStr: string, timeStr: string): Date {
 
 export type SweepDeps = {
   now: () => Date;
-  isWorkday: (date: Date) => boolean;
+  isWorkday: (date: Date) => boolean | Promise<boolean>;
   loadEnabledSchedules: () => Promise<Schedule[]>;
   hasRunToday: (
     userId: string,
@@ -344,8 +394,9 @@ export type SweepDeps = {
 
 export const defaultSweepDeps: SweepDeps = {
   now: () => new Date(),
-  isWorkday: (date) =>
-    !isWeekend(manilaDateString(date)) && isPhilippineHoliday(date) === null,
+  isWorkday: async (date) =>
+    !isWeekend(manilaDateString(date)) &&
+    (await resolveHolidayDecision(date)).skip === null,
   loadEnabledSchedules: async () =>
     db.select().from(schedules).where(eq(schedules.enabled, true)),
   hasRunToday: async (userId, action, dateStr, now) => {
@@ -422,8 +473,10 @@ export async function sweepMissedRuns(
 ): Promise<void> {
   try {
     const now = deps.now();
-    // Same rules as fireCron: a weekend or holiday is not a missed run.
-    if (!deps.isWorkday(now)) return;
+    // Same rules as fireCron: a weekend or holiday is not a missed run. A
+    // "possible" (regional/ambiguous gazette) holiday does NOT skip, so it is
+    // still a workday for the sweep — the run was expected to proceed.
+    if (!(await deps.isWorkday(now))) return;
 
     const todayStr = manilaDateString(now);
     const graceMs = config.MISSED_RUN_GRACE_MINUTES * 60 * 1000;

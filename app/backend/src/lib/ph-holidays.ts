@@ -5,12 +5,7 @@ const hd = new Holidays("PH");
 export type HolidayInfo = {
   name: string;
   type: string;
-  source: "library" | "override";
-};
-
-/** Manual overrides for proclamation-only days the library hasn't picked up. */
-const EXTRAS: Record<string, Omit<HolidayInfo, "source"> & { source: "override" }> = {
-  // "2026-02-17": { name: "Chinese New Year", type: "public", source: "override" },
+  source: "library" | "override" | "gazette";
 };
 
 /** Holiday types we treat as "skip the auto clock action". */
@@ -22,14 +17,16 @@ const SKIP_TYPES = new Set(["public", "bank", "optional"]);
  * The `type` lets callers tell a regular holiday (`public`) from a special
  * non-working day (`optional`) so they can branch on it — e.g. only notify on
  * the less-certain `optional` skips.
+ *
+ * This is the pure LIBRARY lookup only (phase 13). The EXTRA_HOLIDAYS overrides
+ * and the Official Gazette cache are layered on top by services/holidays.ts,
+ * which consults all three sources (override > library > gazette, gazette
+ * additive-only). Keeping the library query here preserves `date-holidays`
+ * module ownership (rule 9).
  */
 export function isPhilippineHoliday(
   date: Date = new Date(),
 ): HolidayInfo | null {
-  const iso = manilaDateString(date);
-  const extra = EXTRAS[iso];
-  if (extra) return extra;
-
   const hits = hd.isHoliday(date);
   if (Array.isArray(hits)) {
     const match = hits.find((h) => SKIP_TYPES.has(h.type));

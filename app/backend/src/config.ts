@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { parseSignupAllowlist } from "./lib/signup-allowlist";
 import { parseTrustedCloudflarePeers } from "./lib/trusted-peers";
+import { parseExtraHolidays } from "./lib/extra-holidays";
 
 // Compose passes every ${KEY} through as the empty string when the variable is
 // unset, while a native (tsx --env-file) run leaves it undefined. Both must
@@ -94,6 +95,13 @@ const envSchema = z.object({
   // identifying data (no email/user/run id) and must never affect a run.
   HEARTBEAT_URL: z
     .preprocess(emptyToUndefined, z.string().url().optional()),
+  // Operator holiday overrides (phase 13A): a comma-separated list of
+  // YYYY-MM-DD=Name entries for days the bundled dataset can't know about
+  // (proclamations that land part-way through a year). Unset/empty = today's
+  // behaviour (no overrides). Validated at boot — a malformed entry (bad date
+  // such as 2026-02-31, or a missing name) refuses to start, naming the
+  // position and the fix (same stance as SIGNUP_ALLOWED / TRUSTED_CLOUDFLARE_PEERS).
+  EXTRA_HOLIDAYS: z.preprocess(emptyToUndefined, z.string().optional()),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;
@@ -148,6 +156,20 @@ export function loadConfig(): AppConfig {
     throw new Error(
       "Invalid environment configuration:\n" +
         `  - TRUSTED_CLOUDFLARE_PEERS: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+    );
+  }
+  // EXTRA_HOLIDAYS (phase 13A): same "refuse to start on a bad value" stance as
+  // the peers above. A silently-dropped entry would be a holiday that does not
+  // skip — the exact bug this phase exists to eliminate. Fail at boot instead,
+  // naming the offending position and the fix.
+  try {
+    parseExtraHolidays(parsed.data.EXTRA_HOLIDAYS);
+  } catch (err) {
+    throw new Error(
+      "Invalid environment configuration:\n" +
+        `  - EXTRA_HOLIDAYS: ${
           err instanceof Error ? err.message : String(err)
         }`,
     );

@@ -43,6 +43,13 @@
       "when": 1787552980257,
       "tag": "0005_holiday_skip_notices",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787558015990,
+      "tag": "0006_gazette_holidays",
+      "breakpoints": true
     }
   ]
 }

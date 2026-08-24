@@ -236,5 +236,7 @@ Not part of the initial migration — specified in their own phase files, listed
 |---|---|---|
 | `notification_settings` | 6 | one row per user: encrypted Telegram bot token, chat ID, four outcome toggles, blocked-count |
 | `missed_run_notices` | 6 | idempotency ledger for the reconciliation sweep; **unique on `(user_id, manila_date, action)`** — that index *is* the "notify once" guarantee |
+| `holiday_skip_notices` | 11 | idempotency ledger for the holiday-skip reminder; **unique on `(user_id, manila_date)`** (deliberately omits `action` so the in/out fires of a day produce ONE message) |
+| `gazette_holidays` | 13 | cache of Official Gazette proclamation holidays; **unique on `(manila_date, name)`**, `scope` in (`national`/`regional`/`ambiguous`), only `national` may produce a skip |
 
 Phase 7 adds `paused_from` / `paused_until` columns to `schedules` (inclusive Manila-day range).

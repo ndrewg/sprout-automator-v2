@@ -3,7 +3,8 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/client";
 import { schedules, type Schedule } from "../db/schema";
 import { logger } from "../lib/logger";
-import { isPausedOn, isPhilippineHoliday } from "../lib/ph-holidays";
+import { isPausedOn } from "../lib/ph-holidays";
+import { resolveHolidayDecision } from "./holidays";
 import { startRun } from "./runs";
 import { sweepMissedRuns, notifyHolidaySkip } from "./notifications";
 import { pingHeartbeat } from "../lib/heartbeat";
@@ -134,19 +135,38 @@ export async function fireCron(
   // else. Fire-and-forget and a no-op when HEARTBEAT_URL is unset; a dead or
   // hanging endpoint can never affect the run (hard rules 2 & 11).
   pingHeartbeat();
-  const holiday = isPhilippineHoliday(now);
-  if (holiday) {
+  const decision = await resolveHolidayDecision(now);
+  if (decision.skip) {
     logger.info(
-      { userId, action, holiday: holiday.name, type: holiday.type },
+      {
+        userId,
+        action,
+        holiday: decision.skip.name,
+        type: decision.skip.type,
+        source: decision.skip.source,
+      },
       "skipping scheduled run — Philippine holiday",
     );
-    // An `optional` (special non-working day) skip sends one reminder — public
-    // holidays stay silent. Fire-and-forget: a dead Telegram endpoint must not
-    // change the skip decision or delay anything (hard rule 11). Idempotent via
-    // the database, so the in/out fires of the same day and a restart cannot
+    // Notify on an `optional` (special non-working day), an `override`
+    // (operator-typed), or a `gazette` (proclamation) skip — a `public` library
+    // holiday stays silent. The Gazette disagreement note (library's lunar date
+    // vs proclaimed date) is appended when present. Fire-and-forget: a dead
+    // Telegram endpoint must not change the skip decision or delay anything
+    // (hard rule 11). Idempotent via the database (one notice per user per
+    // Manila day), so the in/out fires of the same day and a restart cannot
     // duplicate it.
-    void notifyHolidaySkip(userId, holiday, now).catch(() => {}); // oxlint-disable-line promise/prefer-await-to-then -- sanctioned fire-and-forget idiom (#2), §03.
+    void notifyHolidaySkip(userId, decision.skip, now, {
+      note: decision.disagreementNote,
+    }).catch(() => {}); // oxlint-disable-line promise/prefer-await-to-then -- sanctioned fire-and-forget idiom (#2), §03.
     return;
+  }
+  // A "possible" holiday (regional/ambiguous gazette proclamation) does NOT
+  // skip — but the human should be told so they can decide. Notify without
+  // blocking the run (fire-and-forget), then proceed to enqueue normally.
+  if (decision.possible) {
+    void notifyHolidaySkip(userId, decision.possible, now, {
+      possible: true,
+    }).catch(() => {}); // oxlint-disable-line promise/prefer-await-to-then -- sanctioned fire-and-forget idiom (#2), §03.
   }
   try {
     const [schedule] = await db

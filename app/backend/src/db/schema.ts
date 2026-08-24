@@ -224,6 +224,38 @@ export const holidaySkipNotices = pgTable(
   }),
 );
 
+// gazette_holidays — cached Official Gazette proclamation holidays (phase 13).
+// Populated by a nightly fetch; read CACHE-FIRST at decision time (no network
+// when deciding whether to run — a cold or stale cache degrades to the
+// library, never blocks). ADDITIVE-ONLY: a gazette entry may ADD a skip but
+// never cancel one the library or an override already found. `scope` records
+// the detected locality so a regional/ambiguous proclamation NOTIFIES but does
+// not skip (fail-safe: "ask the human", never infer national from absence of a
+// qualifier).
+export const gazetteHolidays = pgTable(
+  "gazette_holidays",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    // YYYY-MM-DD in Asia/Manila — a Manila calendar day, not an instant.
+    manilaDate: text("manila_date").notNull(),
+    name: text("name").notNull(),
+    // 'national' | 'regional' | 'ambiguous' — how the proclamation's scope was
+    // classified by lib/gazette.ts. Only 'national' may produce a skip.
+    scope: text("scope").notNull(),
+    proclamationNo: text("proclamation_no"),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    oncePerDateName: uniqueIndex("gazette_holiday_date_name").on(
+      t.manilaDate,
+      t.name,
+    ),
+    dateIdx: index("gazette_holiday_date_idx").on(t.manilaDate),
+  }),
+);
+
 // reset_tokens — single-use password reset links (§4B.3). Only the SHA-256
 // hash of the raw token is stored; the raw value lives only in the emailed
 // link. purpose is free text so a later phase can add 'verify' values without
@@ -259,4 +291,5 @@ export type AuditLogEntry = typeof auditLog.$inferSelect;
 export type NotificationSettings = typeof notificationSettings.$inferSelect;
 export type MissedRunNotice = typeof missedRunNotices.$inferSelect;
 export type HolidaySkipNotice = typeof holidaySkipNotices.$inferSelect;
+export type GazetteHoliday = typeof gazetteHolidays.$inferSelect;
 export type ResetToken = typeof resetTokens.$inferSelect;
