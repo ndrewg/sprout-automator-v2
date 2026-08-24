@@ -2,7 +2,7 @@
 
 **Goal:** stop clocking people in on Philippine special non-working days. One wrong filter is doing it today.
 
-> ⏰ **Deadline: 2026-08-21.** The next day this defect misfires is **Ninoy Aquino Day**. If nothing else in the queue moves this week, this must.
+> ⏰ **2026-08-21 (Ninoy Aquino Day) came and went with this unfixed** — check the scheduled host's run history for that date and correct the attendance record if a run succeeded. **The next weekday miss is 2026-11-02 (All Souls' Day)**, then 2026-12-08, 2026-12-24 and 2026-12-31. `2026-11-01` (All Saints') falls on a Sunday, so the `1-5` weekday filter already covers it.
 
 **Attach for this session:** `03-CONVENTIONS-AND-GUARDRAILS.md`, `02-DECISIONS-AND-ARCHITECTURE.md` (§ holidays), `phases/phase-7-schedule-pause.md` (the pause window this must not duplicate), `reference/testing-strategy.md`.
 
@@ -25,7 +25,7 @@ const SKIP_TYPES = new Set(["public", "bank"]);
 
 ```
 2026-02-17 | optional | Chinese New Year
-2026-08-21 | optional | Ninoy Aquino Day        <-- next miss
+2026-08-21 | optional | Ninoy Aquino Day        <-- MISFIRED 2026-08-21, unfixed
 2026-11-01 | optional | All Saints' Day
 2026-11-02 | optional | All Souls' Day
 2026-12-08 | optional | Immaculate Conception
@@ -92,8 +92,8 @@ Baselines: **161 backend unit / 106 backend integration.** Higher is expected; l
 
 | # | Check | Pass looks like |
 |---|---|---|
-| 1 | **2026-08-21 (Ninoy Aquino Day), real scheduled run** | **No clock-in.** A Telegram naming it a special non-working day and mentioning "Clock in now" |
+| 1 | **The next weekday `optional` holiday — 2026-11-02, All Souls' Day — real scheduled run** | **No clock-in.** A Telegram naming it a special non-working day and mentioning "Clock in now". Until then, force it by setting the system date or by adding the date via phase 13's `EXTRA_HOLIDAYS`; note in the addendum which you did, because a forced check is weaker evidence than the real day |
 | 2 | A `public` holiday (e.g. 2026-11-30 Bonifacio Day) | Skipped **silently** — no Telegram |
 | 3 | Restart the container on a holiday after the notice was sent | No duplicate message |
 
-Row 1 is the whole point and can only be checked on the day. Commit per the loop in `AGENTS.md`; tag `phase-11-complete` when the table is filled in.
+Row 1 is the whole point. It could not be checked on 2026-08-21 because the fix was not in yet; the next real opportunity is 2026-11-02. Commit per the loop in `AGENTS.md`; tag `phase-11-complete` when the table is filled in.

@@ -51,9 +51,11 @@ Work the queue in order without pausing for approval between phases. You cannot 
 
 ## Queue order — one exception you must apply
 
-Work the queue top-down, **except**: if **phase 11 (Holiday skip types)** is not yet committed and today is before **2026-08-21**, do **phase 11 first**.
+Work the queue top-down, **except**: if **phase 11 (Holiday skip types)** is not yet committed and the next weekday `optional` holiday is **less than about a week away**, do phase 11 first.
 
-Phase 11 is small and has a hard calendar deadline — the live defect clocks the operator in on Ninoy Aquino Day. Phase 10 is larger, riskier (a nine-minor Drizzle upgrade), and has no deadline; a red CI pipeline is embarrassing, a false payroll record is not recoverable. Check the date with `date` and decide. Say in your report that you applied this exception and why.
+Phase 11 is small and carries a live defect that files a false attendance record; phase 10 is larger, riskier (a nine-minor Drizzle upgrade) and has no deadline. A red CI pipeline is embarrassing; a wrong payroll entry is not recoverable. So a near deadline beats a red pipeline.
+
+**As of 2026-08-24 that exception does not apply** — 2026-08-21 already misfired unfixed, and the next weekday miss is **2026-11-02** (All Souls'). Check `date` yourself rather than trusting this paragraph, and say in your report which branch you took.
 
 Otherwise honour the dependencies the queue records: **13 and 14 both require 11**; **16 requires 15**.
 

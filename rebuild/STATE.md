@@ -13,7 +13,7 @@ Work these **in numeric order**. If a number and this table ever disagree, **the
 | # | Phase | Runner | Blocked on |
 |---|---|---|---|
 | **10** | [Dependency hygiene](./phases/phase-10-dependency-hygiene.md) | orchestrator | nothing — **CI is red now** |
-| **11** | [Holiday skip types](./phases/phase-11-holiday-skip-types.md) | orchestrator | nothing — ⏰ **deadline 2026-08-21** |
+| **11** | [Holiday skip types](./phases/phase-11-holiday-skip-types.md) | orchestrator | nothing — ⏰ **next miss 2026-11-02** (All Souls'). **2026-08-21 already misfired unfixed** |
 | **12** | [Durability & observability](./phases/phase-12-durability-and-observability.md) | orchestrator | `[manual]` needs a Windows reboot and a real restore |
 | **13** | [Holiday sourcing](./phases/phase-13-holiday-sourcing.md) | orchestrator | phase 11; `[manual]` needs a real proclamation day |
 | **14** | [Retry on transient failure](./phases/phase-14-retry.md) | orchestrator | phase 11 |
