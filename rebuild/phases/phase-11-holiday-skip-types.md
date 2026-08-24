@@ -27,7 +27,7 @@ const SKIP_TYPES = new Set(["public", "bank"]);
 2026-02-17 | optional | Chinese New Year
 2026-08-21 | optional | Ninoy Aquino Day        <-- MISFIRED 2026-08-21, unfixed
 2026-11-01 | optional | All Saints' Day
-2026-11-02 | optional | All Souls' Day
+2026-11-02 | optional | All Souls' Day          <-- next weekday miss
 2026-12-08 | optional | Immaculate Conception
 2026-12-24 | optional | Christmas Eve
 2026-12-31 | optional | New Year's Eve
