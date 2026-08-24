@@ -5,7 +5,9 @@ import {
   dispatch,
   expectedFireTime,
   isWeekend,
+  notifyHolidaySkip,
   notifyRunFinished,
+  renderHolidaySkipMessage,
   renderMissedMessage,
   renderRunFinishedMessage,
   sweepMissedRuns,
@@ -17,14 +19,15 @@ import type { Run } from "../../src/db/schema";
 // db/client + audit). The sweep is fully dependency-injected. Nothing here
 // reaches api.telegram.org or Postgres.
 
-const { selectMock, updateMock, recordAuditMock } = vi.hoisted(() => ({
+const { selectMock, updateMock, insertMock, recordAuditMock } = vi.hoisted(() => ({
   selectMock: vi.fn(),
   updateMock: vi.fn(),
+  insertMock: vi.fn(),
   recordAuditMock: vi.fn(),
 }));
 
 vi.mock("../../src/db/client", () => ({
-  db: { select: selectMock, update: updateMock },
+  db: { select: selectMock, update: updateMock, insert: insertMock },
 }));
 
 vi.mock("../../src/lib/audit", () => ({
@@ -289,6 +292,21 @@ describe("renderMissedMessage", () => {
   });
 });
 
+describe("renderHolidaySkipMessage", () => {
+  it("names the holiday, says it is special non-working, and offers Clock in now", () => {
+    expect(renderHolidaySkipMessage("Ninoy Aquino Day", "2026-08-21")).toBe(
+      "🏖️ <b>Ninoy Aquino Day</b> is a special non-working day today (Fri 21 Aug).\n" +
+        "No clock was scheduled. Working after all? <b>Clock in now</b>.",
+    );
+  });
+
+  it("escapes markup in a holiday name before inserting it into HTML", () => {
+    const html = renderHolidaySkipMessage("Feast <b>&</b>", "2026-08-21");
+    expect(html).not.toContain("<b>Feast <b>");
+    expect(html).toContain("Feast &lt;b&gt;&amp;&lt;/b&gt;");
+  });
+});
+
 describe("escapeHtml", () => {
   it("neutralises markup in run-derived strings", () => {
     expect(escapeHtml("<b>bold</b> & <i>italic</i>")).toBe(
@@ -411,6 +429,83 @@ describe("notifyRunFinished", () => {
     });
     expect(out).toBe("skipped");
     expect(updateMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("notifyHolidaySkip — the special-non-working-day reminder", () => {
+  const NOW = new Date("2026-08-21T04:00:00Z"); // noon Manila, Ninoy Aquino Day
+  const sendMock2 = vi.fn<
+    (botToken: string, chatId: string, html: string) => Promise<TelegramSendResult>
+  >();
+
+  // stubDb supplies the select for dispatch's settings lookup.
+  function stubInsert(returning: unknown[]): void {
+    insertMock.mockImplementation(() => ({
+      values: () => ({
+        onConflictDoNothing: () => ({ returning: async () => returning }),
+      }),
+    }));
+  }
+
+  it("is silent for a public holiday (no insert, no send)", async () => {
+    stubDb(makeRow());
+    stubInsert([{ id: "n1" }]);
+    const out = await notifyHolidaySkip(
+      "user-1",
+      { name: "Christmas Day", type: "public", source: "library" },
+      new Date("2026-12-25T04:00:00Z"),
+      sendMock2,
+    );
+    expect(out).toBe("skipped");
+    expect(insertMock).not.toHaveBeenCalled();
+    expect(sendMock2).not.toHaveBeenCalled();
+  });
+
+  it("sends one reminder for an optional holiday when the insert wins", async () => {
+    stubDb(makeRow());
+    stubInsert([{ id: "n1" }]);
+    sendMock2.mockResolvedValue({ ok: true });
+    const out = await notifyHolidaySkip(
+      "user-1",
+      { name: "Ninoy Aquino Day", type: "optional", source: "library" },
+      NOW,
+      sendMock2,
+    );
+    expect(out).toBe("sent");
+    expect(sendMock2).toHaveBeenCalledTimes(1);
+    const html = sendMock2.mock.calls[0]![2];
+    expect(html).toContain("Ninoy Aquino Day");
+    expect(html).toContain("Clock in now");
+  });
+
+  it("does not re-send when a prior insert already claimed the day (idempotent)", async () => {
+    stubDb(makeRow());
+    stubInsert([]); // onConflictDoNothing returned no row — another fire won
+    sendMock2.mockResolvedValue({ ok: true });
+    const out = await notifyHolidaySkip(
+      "user-1",
+      { name: "Ninoy Aquino Day", type: "optional", source: "library" },
+      NOW,
+      sendMock2,
+    );
+    expect(out).toBe("skipped");
+    expect(sendMock2).not.toHaveBeenCalled();
+  });
+
+  it("skips when notifications are not configured/enabled (dispatch returns skipped)", async () => {
+    stubDb(makeRow({ enabled: false }));
+    stubInsert([{ id: "n1" }]);
+    sendMock2.mockResolvedValue({ ok: true });
+    const out = await notifyHolidaySkip(
+      "user-1",
+      { name: "Ninoy Aquino Day", type: "optional", source: "library" },
+      NOW,
+      sendMock2,
+    );
+    // The insert won, but dispatch declined to send — a dead/off notification
+    // setting must not throw or change the (silent) outcome.
+    expect(out).toBe("skipped");
+    expect(sendMock2).not.toHaveBeenCalled();
   });
 });
 

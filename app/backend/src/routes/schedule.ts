@@ -34,7 +34,12 @@ type ScheduleView = {
 
 function todayInfo(): { date: string; holiday: string | null } {
   const now = new Date();
-  return { date: manilaDateString(now), holiday: isPhilippineHoliday(now) };
+  return {
+    date: manilaDateString(now),
+    // The frontend contract is a holiday name string; the enriched return type
+    // (name/type/source) is for the scheduler's branch-on-type, not this view.
+    holiday: isPhilippineHoliday(now)?.name ?? null,
+  };
 }
 
 function toView(row: Schedule | undefined): ScheduleView {

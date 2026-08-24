@@ -76,6 +76,10 @@ Two pieces of dead scaffolding sit alongside it: `isYearCovered()` (`ph-holidays
 - A second dispatch for the same user, Manila date and action is suppressed.
 - A failing Telegram endpoint does not affect the skip.
 
+> ⚠️ **As-built (found 2026-08-24):** the idempotency key is **`(user_id, manila_date)` — NOT `(user_id, manila_date, action)`** as this section literally says. The two hard requirements — "send ONE Telegram" and "the second cron fire of the same day (`in` then `out`) must NOT duplicate" — are mutually incompatible with a 3-column key: keying on `action` would make the `in` fire and the `out` fire two distinct keys, so a holiday would send **two** messages. Dropping `action` from the unique key is the only way to satisfy both requirements (first fire inserts and sends; the second fire finds the key exists and skips). The `action` is simply not stored/needed for the one-per-day reminder. The `holiday_skip_notices` table therefore has a unique index on `(user_id, manila_date)` only.
+
+> ⚠️ **As-built (found 2026-08-24):** no new toggle column/config key was added. The holiday reminder reuses the existing **`notifyOnMissed`** toggle (a holiday skip is the "automation didn't run, here's why" class of informational alert), routing through the existing `dispatch` send path with a new `DispatchKind = "holiday"` mapped to `notifyOnMissed`. This honours notification opt-in/auto-disable for free. `date-holidays` 3.35.0 was confirmed programmatically to label PH special non-working days as `type: "optional"` (with `note: "Non-working Day"`), exactly as the spec's list assumed.
+
 **Gate 11B:** `cd app/backend && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration`
 
 ---

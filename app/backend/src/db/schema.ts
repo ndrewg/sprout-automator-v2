@@ -201,6 +201,29 @@ export const missedRunNotices = pgTable(
   }),
 );
 
+// holiday_skip_notices — idempotency ledger for the "special non-working day"
+// Telegram reminder (phase 11). One row per (user, Manila date) means "we
+// already told them about the optional holiday" — a public holiday stays
+// silent, and the in/out cron fires of the same day must produce ONE message,
+// so the unique key deliberately omits `action`.
+export const holidaySkipNotices = pgTable(
+  "holiday_skip_notices",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // YYYY-MM-DD in Asia/Manila — a Manila calendar day, not an instant.
+    manilaDate: text("manila_date").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    oncePerDay: uniqueIndex("holiday_skip_notice_once").on(t.userId, t.manilaDate),
+  }),
+);
+
 // reset_tokens — single-use password reset links (§4B.3). Only the SHA-256
 // hash of the raw token is stored; the raw value lives only in the emailed
 // link. purpose is free text so a later phase can add 'verify' values without
@@ -235,4 +258,5 @@ export type Run = typeof runs.$inferSelect;
 export type AuditLogEntry = typeof auditLog.$inferSelect;
 export type NotificationSettings = typeof notificationSettings.$inferSelect;
 export type MissedRunNotice = typeof missedRunNotices.$inferSelect;
+export type HolidaySkipNotice = typeof holidaySkipNotices.$inferSelect;
 export type ResetToken = typeof resetTokens.$inferSelect;

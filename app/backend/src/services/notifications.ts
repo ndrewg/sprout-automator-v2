@@ -2,6 +2,7 @@ import { and, eq, gte } from "drizzle-orm";
 import { config } from "../config";
 import { db } from "../db/client";
 import {
+  holidaySkipNotices,
   missedRunNotices,
   notificationSettings,
   runs,
@@ -12,7 +13,12 @@ import {
 import { decryptOptional } from "../lib/encryption";
 import { recordAudit } from "../lib/audit";
 import { logger } from "../lib/logger";
-import { isPausedOn, isPhilippineHoliday, manilaDateString } from "../lib/ph-holidays";
+import {
+  isPausedOn,
+  isPhilippineHoliday,
+  manilaDateString,
+  type HolidayInfo,
+} from "../lib/ph-holidays";
 import { stripAnsi, truncateText } from "../lib/text";
 import {
   escapeHtml,
@@ -32,7 +38,7 @@ const CHAT_ID_RE = /^-?\d+$/;
 // case where the user is probably NOT clocked in (phase 6 rationale).
 const UNSAFE_SKIP_RE = /safety measure|Could not/;
 
-export type DispatchKind = "success" | "failure" | "skipped" | "missed";
+export type DispatchKind = "success" | "failure" | "skipped" | "missed" | "holiday";
 export type DispatchOutcome = "skipped" | "sent" | "failed";
 
 type SendFn = (
@@ -52,6 +58,10 @@ const TOGGLE_FOR_KIND: Record<
   failure: "notifyOnFailure",
   skipped: "notifyOnSkipped",
   missed: "notifyOnMissed",
+  // A holiday skip is "the automation did not run today, here's why" — the
+  // same class of informational alert as a missed run, so it honours the
+  // missed toggle (phase 11; no new toggle column).
+  holiday: "notifyOnMissed",
 };
 
 // --- Time / message rendering (pure, unit-testable) -------------------------
@@ -128,6 +138,19 @@ export function renderMissedMessage(
     `🔴 <b>${label} did not run</b>\nExpected ${hhmm} · ${formatManilaDay(dateStr)}\n\n` +
     `No run was recorded today. The scheduler may have been asleep or the ` +
     `server down. Clock ${verb} manually if you haven't already.`
+  );
+}
+
+/**
+ * The "special non-working day" reminder (phase 11). Sent only for `optional`
+ * holiday skips — a `public` holiday is silent. Tells the operator which day
+ * it is and that the "Clock in now" button is there if they're working anyway.
+ */
+export function renderHolidaySkipMessage(name: string, dateStr: string): string {
+  return (
+    `🏖️ <b>${escapeHtml(name)}</b> is a special non-working day today ` +
+    `(${formatManilaDay(dateStr)}).\n` +
+    `No clock was scheduled. Working after all? <b>Clock in now</b>.`
   );
 }
 
@@ -227,6 +250,51 @@ export async function notifyRunFinished(params: {
   }
 }
 
+/**
+ * The "special non-working day" reminder, called from fireCron when a holiday
+ * skip happens. Distinct from the run-finished dispatch because there is NO
+ * run row — fireCron returns before any runs insert.
+ *
+ * Idempotent via the database (the same "let the database decide" pattern as
+ * the missed-run notices): we insert a holiday_skip_notices row keyed on
+ * (user_id, manila_date) and only the insert-winner sends. The key omits
+ * `action` so the in/out cron fires of the same day produce ONE message, and a
+ * container restart cannot duplicate it. No state is held in memory.
+ *
+ * A `public` holiday is silent — only `optional` (special non-working days)
+ * notify, because those are the less-certain skips where a wrong guess costs
+ * one click that morning.
+ *
+ * This is deliberately fire-and-forget (callers use `.catch(() => {})`): a dead
+ * Telegram endpoint must not change the skip decision or delay anything
+ * (hard rule 11). The `send` param is for tests.
+ */
+export async function notifyHolidaySkip(
+  userId: string,
+  holiday: HolidayInfo,
+  now: Date,
+  send: SendFn = sendTelegramMessage,
+): Promise<"sent" | "skipped"> {
+  if (holiday.type !== "optional") return "skipped";
+  const dateStr = manilaDateString(now);
+
+  // The database decides who sends: onConflictDoNothing means a conflicting
+  // (user, date) returns NO row, and only a real insert returns one. Two
+  // overlapping fires cannot double-insert or double-send.
+  const [inserted] = await db
+    .insert(holidaySkipNotices)
+    .values({ userId, manilaDate: dateStr })
+    .onConflictDoNothing({
+      target: [holidaySkipNotices.userId, holidaySkipNotices.manilaDate],
+    })
+    .returning();
+  if (inserted === undefined) return "skipped";
+
+  const html = renderHolidaySkipMessage(holiday.name, dateStr);
+  const outcome = await dispatch(userId, html, "holiday", send);
+  return outcome === "sent" ? "sent" : "skipped";
+}
+
 // --- Missed-run reconciliation ----------------------------------------------
 
 /** "YYYY-MM-DD" Manila date; true for Saturday/Sunday. */
@@ -277,7 +345,7 @@ export type SweepDeps = {
 export const defaultSweepDeps: SweepDeps = {
   now: () => new Date(),
   isWorkday: (date) =>
-    !isWeekend(manilaDateString(date)) && !isPhilippineHoliday(date),
+    !isWeekend(manilaDateString(date)) && isPhilippineHoliday(date) === null,
   loadEnabledSchedules: async () =>
     db.select().from(schedules).where(eq(schedules.enabled, true)),
   hasRunToday: async (userId, action, dateStr, now) => {

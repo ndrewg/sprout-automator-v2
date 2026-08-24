@@ -5,7 +5,7 @@ import { schedules, type Schedule } from "../db/schema";
 import { logger } from "../lib/logger";
 import { isPausedOn, isPhilippineHoliday } from "../lib/ph-holidays";
 import { startRun } from "./runs";
-import { sweepMissedRuns } from "./notifications";
+import { sweepMissedRuns, notifyHolidaySkip } from "./notifications";
 import type { ClockAction } from "../automation/clock";
 
 type UserTasks = { clockIn: ScheduledTask; clockOut: ScheduledTask };
@@ -109,9 +109,15 @@ export async function fireCron(
   const holiday = isPhilippineHoliday(now);
   if (holiday) {
     logger.info(
-      { userId, action, holiday },
+      { userId, action, holiday: holiday.name, type: holiday.type },
       "skipping scheduled run — Philippine holiday",
     );
+    // An `optional` (special non-working day) skip sends one reminder — public
+    // holidays stay silent. Fire-and-forget: a dead Telegram endpoint must not
+    // change the skip decision or delay anything (hard rule 11). Idempotent via
+    // the database, so the in/out fires of the same day and a restart cannot
+    // duplicate it.
+    void notifyHolidaySkip(userId, holiday, now).catch(() => {}); // oxlint-disable-line promise/prefer-await-to-then -- sanctioned fire-and-forget idiom (#2), §03.
     return;
   }
   try {
