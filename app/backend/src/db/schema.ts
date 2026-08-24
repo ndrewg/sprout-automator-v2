@@ -22,6 +22,10 @@ export const users = pgTable(
     passwordHash: text("password_hash").notNull(),
     emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
     isAdmin: boolean("is_admin").notNull().default(false),
+    // Phase 14: whether this user has ever received the one-time "retry is
+    // running on defaults" intro message. Set true after the first intro so the
+    // default is explained exactly once, not on every failure.
+    retryIntroShown: boolean("retry_intro_shown").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -109,6 +113,10 @@ export const runs = pgTable(
     })
       .notNull()
       .default("pending"),
+    // Phase 14: which attempt this run is. The original scheduled/manual run is
+    // attempt 0; each retry is attempt 1, 2, … up to RETRY_MAX_ATTEMPTS. Used to
+    // bound retries and to render "tried N times" in the give-up message.
+    attempt: integer("attempt").notNull().default(0),
     loginMethod: text("login_method"),
     error: text("error"),
     steps: jsonb("steps")

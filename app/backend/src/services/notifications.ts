@@ -26,6 +26,7 @@ import {
 } from "../lib/telegram";
 import type { ClockAction } from "../automation/clock";
 import { resolveHolidayDecision } from "./holidays";
+import { hasPendingRetry as hasPendingRetryFromRegistry } from "./retry-registry";
 
 // Policy for notifications. Deliberately HTTP-free (the transport lives in
 // lib/telegram.ts) and DB-aware (settings, blocked-count, the idempotency
@@ -38,7 +39,13 @@ const CHAT_ID_RE = /^-?\d+$/;
 // case where the user is probably NOT clocked in (phase 6 rationale).
 const UNSAFE_SKIP_RE = /safety measure|Could not/;
 
-export type DispatchKind = "success" | "failure" | "skipped" | "missed" | "holiday";
+export type DispatchKind =
+  | "success"
+  | "failure"
+  | "skipped"
+  | "missed"
+  | "holiday"
+  | "retry";
 export type DispatchOutcome = "skipped" | "sent" | "failed";
 
 type SendFn = (
@@ -62,6 +69,10 @@ const TOGGLE_FOR_KIND: Record<
   // same class of informational alert as a missed run, so it honours the
   // missed toggle (phase 11; no new toggle column).
   holiday: "notifyOnMissed",
+  // A retry-scheduled / give-up message (phase 14) is a failure-adjacent
+  // alert — the user's run failed and needs (or had) retrying — so it honours
+  // the failure toggle. No new toggle column.
+  retry: "notifyOnFailure",
 };
 
 // --- Time / message rendering (pure, unit-testable) -------------------------
@@ -375,6 +386,14 @@ export type SweepDeps = {
     dateStr: string,
     now: Date,
   ) => Promise<boolean>;
+  // Phase 14: whether a retry is currently pending for (user, action, date).
+  // When it is, the sweep must NOT also send a missed-run alert — both would
+  // describe the same morning and train the user to distrust both.
+  hasPendingRetry: (
+    userId: string,
+    action: ClockAction,
+    dateStr: string,
+  ) => boolean;
   // "claimed" = this sweep inserted the notice row and owns the send.
   // "retry"  = the row already exists but was never notified (send failed or
   //            was skipped earlier) — a later sweep may try again.
@@ -417,6 +436,8 @@ export const defaultSweepDeps: SweepDeps = {
       );
     return rows.some((r) => manilaDateString(r.startedAt) === dateStr);
   },
+  hasPendingRetry: (userId, action, dateStr) =>
+    hasPendingRetryFromRegistry(userId, action, dateStr),
   tryInsertMissedNotice: async (userId, action, dateStr) => {
     // The database decides who sends, not application logic: onConflictDoNothing
     // means a conflicting (user, date, action) returns NO row, and only a real
@@ -494,7 +515,12 @@ export async function sweepMissedRuns(
         if (now.getTime() < expected.getTime() + graceMs) continue;
 
         const hasRun = await deps.hasRunToday(row.userId, action, todayStr, now);
-        if (hasRun) continue;
+        // A retry is pending: the morning is being handled — a missed-run alert
+        // would duplicate the retry messages and train the user to distrust
+        // both (phase 14B). Suppress.
+        if (hasRun || deps.hasPendingRetry(row.userId, action, todayStr)) {
+          continue;
+        }
 
         const claim = await deps.tryInsertMissedNotice(
           row.userId,

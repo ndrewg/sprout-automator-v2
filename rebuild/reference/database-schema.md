@@ -31,6 +31,9 @@ export const users = pgTable(
     passwordHash: text("password_hash").notNull(),
     emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
     isAdmin: boolean("is_admin").notNull().default(false),
+    // Phase 14: whether this user has ever received the one-time "retry is
+    // running on defaults" intro message. Set true after the first intro.
+    retryIntroShown: boolean("retry_intro_shown").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -113,6 +116,8 @@ export const runs = pgTable(
     })
       .notNull()
       .default("pending"),
+    // Phase 14: which attempt this run is (0 = original, 1..N = retries).
+    attempt: integer("attempt").notNull().default(0),
     loginMethod: text("login_method"),
     error: text("error"),
     steps: jsonb("steps")

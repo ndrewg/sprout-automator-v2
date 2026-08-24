@@ -102,6 +102,21 @@ const envSchema = z.object({
   // such as 2026-02-31, or a missing name) refuses to start, naming the
   // position and the fix (same stance as SIGNUP_ALLOWED / TRUSTED_CLOUDFLARE_PEERS).
   EXTRA_HOLIDAYS: z.preprocess(emptyToUndefined, z.string().optional()),
+  // Retry on transient failure (phase 14). GLOBAL (operator) config, not
+  // per-user — the spec's framing and a simpler deploy. Interval between
+  // attempts and the max retry attempts are numeric; the two cutoffs are Manila
+  // HH:mm wall-clock times past which a retry for that action is abandoned
+  // (a clock-in recorded at 14:00 is a wrong record, not a late one).
+  RETRY_INTERVAL_MINUTES: z
+    .preprocess(emptyToUndefined, z.coerce.number().int().min(1).max(720).default(30)),
+  RETRY_MAX_ATTEMPTS: z
+    .preprocess(emptyToUndefined, z.coerce.number().int().min(1).max(10).default(3)),
+  // Manila HH:mm strings. "12:00" = clock-in retries stop at midday; "23:00" =
+  // clock-out retries stop at end of day. Validated at boot (see loadConfig).
+  RETRY_CLOCKIN_CUTOFF: z
+    .preprocess(emptyToUndefined, z.string().default("12:00")),
+  RETRY_CLOCKOUT_CUTOFF: z
+    .preprocess(emptyToUndefined, z.string().default("23:00")),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;
@@ -174,7 +189,37 @@ export function loadConfig(): AppConfig {
         }`,
     );
   }
+  // RETRY_* cutoffs (phase 14): the same "refuse to start on a bad value"
+  // stance. A mistyped cutoff is a retry that walks into the afternoon — the
+  // exact thing the wall-clock cutoff exists to prevent. Fail at boot naming
+  // the key and the fix.
+  for (const [key, value] of [
+    ["RETRY_CLOCKIN_CUTOFF", parsed.data.RETRY_CLOCKIN_CUTOFF],
+    ["RETRY_CLOCKOUT_CUTOFF", parsed.data.RETRY_CLOCKOUT_CUTOFF],
+  ] as const) {
+    try {
+      parseHhmm(value);
+    } catch (err) {
+      throw new Error(
+        "Invalid environment configuration:\n" +
+          `  - ${key}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
   return parsed.data;
+}
+
+/** Parse a Manila HH:mm wall-clock string ("05:30", "23:00"). Throws on any
+ *  malformed or out-of-range value. */
+export function parseHhmm(value: string): { hour: number; minute: number } {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(value);
+  if (!m) throw new Error(`expected HH:mm, got "${value}"`);
+  const hour = Number(m[1]);
+  const minute = Number(m[2]);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    throw new Error(`out of range HH:mm, got "${value}"`);
+  }
+  return { hour, minute };
 }
 
 export const config: AppConfig = loadConfig();

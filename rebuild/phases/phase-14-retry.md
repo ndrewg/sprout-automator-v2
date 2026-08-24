@@ -99,3 +99,23 @@ Baselines: **161 backend unit / 106 backend integration / 5 frontend unit / 16 e
 | 7 | Check the runs table after a retry sequence | `attempt` increments; one row per attempt; no orphaned `running` rows |
 
 Row 6 is the one to be most suspicious of. Commit per the loop in `AGENTS.md`; tag `phase-14-complete` when the table is filled in.
+
+---
+
+> ⚠️ **As-built (2026-08-24):** decisions and divergences from the implemented phase.
+>
+> **1. node-cron v4 has NO `scheduleJob(date, fn)`.** The installed node-cron is **4.6.0** (phase 10); its only signature is `schedule(expression, fn, options)`. One-shots are implemented as `cron.schedule("m h * * *", fn, { timezone: "Asia/Manila", maxExecutions: 1 })` where `"m h * * *"` is the target attempt's **Manila wall-clock** time (from `manilaWallTime`). Cancellation is `task.destroy()`. Because a retry always targets the current Manila day, the daily expression fires today; the attempt's own day-rollover re-check cancels it if the wall clock ever lands elsewhere.
+>
+> **2. The interval is anchored to the run's `finishedAt`**, not to the instant the scheduling code runs: `scheduleRetryOnFailure(run, now = null)` uses `now ?? run.finishedAt ?? run.startedAt`. `finalizeRun` calls it with no `now`, so a failure at 05:35 schedules the 06:05 attempt. Tests inject a morning anchor (`now`) because the wall-clock cutoff makes an afternoon clock-in failure correctly unretryable — a suite that runs after 12:00 must not depend on the real clock (this bit the first test run).
+>
+> **3. Config is GLOBAL (operator) config, not per-user** — `RETRY_INTERVAL_MINUTES` (30), `RETRY_MAX_ATTEMPTS` (3), `RETRY_CLOCKIN_CUTOFF` (12:00), `RETRY_CLOCKOUT_CUTOFF` (23:00), all Manila HH:mm. Per-user would have needed a schedule column + UI + migration (scope expansion) and the spec's framing is operator-level. Cutoff defaults chosen: clock-in retries stop at **12:00** (mid-morning; a clock-in after noon is a wrong record), clock-out retries stop at **23:00** (end of day).
+>
+> **4. The retry registry is in-memory only** (`services/retry-registry.ts`): a container **restart drops queued retries**. Documented, accepted limitation — a process that was itself down cannot retry (phase 12's dead-man's-switch covers that), and persisting `nextRetryAt` was judged not worth the state. The one-shot fires go through `attemptRun`, which re-checks holiday (`resolveHolidayDecision`), pause (`isPausedOn`), and day-rollover at EVERY attempt, then inserts the retry row with `attempt = N+1` through the partial-unique-index gate (catch `23505` → treat as already-handled, cancel, never a 500).
+>
+> **5. 14B "silence between attempts" is implemented as REPLACEMENT, not addition.** A failure that schedules a retry (or that ends the sequence with a give-up) does **not** also send the standard failure ⚠️ — `scheduleRetryOnFailure` returns `"retry" | "give-up" | "none"` and `finalizeRun` suppresses `notifyRunFinished` unless the outcome is `"none"`. Otherwise one bad morning would produce one ⚠️ per attempt *plus* the retry messages — precisely the "eight messages" 14B exists to prevent. The decision is fast (memory + config only); the messages are fired fire-and-forget inside, so a dead Telegram endpoint never changes the run's status or timing (rule 11, integration-tested).
+>
+> **6. "Say the default exactly once"** uses `users.retry_intro_shown` (boolean, added in the same `0007` migration). The flag is set on the first retry-scheduled dispatch *attempt*, not only on a successful send — so a user who enables notifications later won't be spammed retroactively; documented trade-off.
+>
+> **7. Schema:** migration **`0007_magenta_zarek.sql`** (drizzle-kit-generated name) adds `runs.attempt integer NOT NULL DEFAULT 0` and `users.retry_intro_shown boolean NOT NULL DEFAULT false`. No committed migration was edited. The `attempt` column is also exposed on `GET /runs` only via the internal `Run` type — the public route deliberately does not render it (no API contract change needed by the spec).
+>
+> **8. "Will retry" message** is sent on the FIRST failure (attempt 0) only, naming the next attempt time; intermediate attempts are silent; the terminal give-up ("failed N times and gave up") is the resolution message. The existing `notifyRunFinished` success/⚠️/skipped messages are unchanged for non-retried outcomes. The queue-backstop path (`failRunFromExecutor`, a rejection escaping the executor — i.e. *this stack* failing) deliberately does NOT schedule retries and keeps its ⚠️.

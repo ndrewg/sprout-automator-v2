@@ -14,6 +14,9 @@ import { createOtpAcquirer } from "./otp-acquisition";
 import { errorSummary, stripAnsi } from "../lib/text";
 import { isUniqueViolation } from "../lib/pg-errors";
 import { notifyRunFinished } from "./notifications";
+import { scheduleRetryOnFailure } from "./retry";
+import { cancelPendingRetry } from "./retry-registry";
+import { manilaDateString } from "../lib/ph-holidays";
 import type { ClockAction } from "../automation/clock";
 
 type StartRunResult =
@@ -23,6 +26,7 @@ type StartRunResult =
 export async function startRun(params: {
   userId: string;
   action: ClockAction;
+  attempt?: number;
 }): Promise<StartRunResult> {
   const { userId, action } = params;
 
@@ -40,10 +44,14 @@ export async function startRun(params: {
   try {
     const [run] = await db
       .insert(runs)
-      .values({ userId, action, status: "pending" })
+      .values({ userId, action, status: "pending", attempt: params.attempt ?? 0 })
       .returning();
     if (!run) throw new Error("startRun: insert returned no row");
     runQueue.enqueue({ runId: run.id });
+    // Starting any run for this action supersedes a pending retry: a manual
+    // "Clock in now" and the next scheduled fire are both explicit statements
+    // that replace the queued retry (phase 14 cancellation).
+    cancelPendingRetry(userId, action, manilaDateString(new Date()));
     logger.info({ runId: run.id, userId, action }, "run enqueued");
     return { ok: true, run };
   } catch (err: unknown) {
@@ -85,10 +93,25 @@ async function finalizeRun(
   // Fire-and-forget (sanctioned idiom #2, §03). A notification must never
   // change run status or timing. notifyRunFinished never throws; the .catch
   // is belt-and-braces so a future refactor can't make this crash a run.
-  void notifyRunFinished({
-    run: updated,
-    skipReason: skipReason ?? null,
-  }).catch(() => {}); // oxlint-disable-line promise/prefer-await-to-then -- sanctioned fire-and-forget idiom (#2), §03.
+  //
+  // Phase 14B: a failure that schedules a retry (or ends with a give-up) does
+  // NOT also get the standard failure ⚠️ — the retry/give-up message replaces
+  // it, so one bad morning produces the scheduling message, silence, and one
+  // resolution message instead of one ⚠️ per attempt. The decision is fast
+  // (memory + config only); the messages themselves are fire-and-forget inside
+  // scheduleRetryOnFailure, so a dead Telegram endpoint can never change the
+  // run's status or timing (hard rule 11).
+  let notifyFailure = true;
+  if (patch.status === "failure") {
+    const outcome = await scheduleRetryOnFailure(updated);
+    notifyFailure = outcome === "none";
+  }
+  if (notifyFailure) {
+    void notifyRunFinished({
+      run: updated,
+      skipReason: skipReason ?? null,
+    }).catch(() => {}); // oxlint-disable-line promise/prefer-await-to-then -- sanctioned fire-and-forget idiom (#2), §03.
+  }
 }
 
 export async function executeQueuedRun(runId: string): Promise<void> {

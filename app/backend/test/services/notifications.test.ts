@@ -92,6 +92,7 @@ function makeRun(overrides: Partial<Run> = {}): Run {
     userId: "user-1",
     action: "in",
     status: "success",
+    attempt: 0,
     loginMethod: null,
     error: null,
     steps: [],
@@ -595,6 +596,7 @@ function makeSweepDeps(overrides: Partial<SweepDeps> = {}): {
       ];
     },
     hasRunToday: async () => false,
+    hasPendingRetry: () => false,
     tryInsertMissedNotice: async (userId, action, dateStr) => {
       calls.inserted.push(`${userId}:${action}:${dateStr}`);
       return "claimed";

@@ -56,6 +56,49 @@ describe("config defaults", () => {
     delete process.env["TRUSTED_CLOUDFLARE_PEERS"];
     expect(loadConfig().TRUSTED_CLOUDFLARE_PEERS).toBeUndefined();
   });
+
+  it("RETRY_INTERVAL_MINUTES defaults to 30 and RETRY_MAX_ATTEMPTS to 3 (phase 14)", () => {
+    delete process.env["RETRY_INTERVAL_MINUTES"];
+    delete process.env["RETRY_MAX_ATTEMPTS"];
+    expect(loadConfig().RETRY_INTERVAL_MINUTES).toBe(30);
+    expect(loadConfig().RETRY_MAX_ATTEMPTS).toBe(3);
+  });
+
+  it("empty-string RETRY_* values resolve to the defaults (compose passthrough)", () => {
+    process.env["RETRY_INTERVAL_MINUTES"] = "";
+    process.env["RETRY_MAX_ATTEMPTS"] = "";
+    process.env["RETRY_CLOCKIN_CUTOFF"] = "";
+    process.env["RETRY_CLOCKOUT_CUTOFF"] = "";
+    expect(loadConfig().RETRY_INTERVAL_MINUTES).toBe(30);
+    expect(loadConfig().RETRY_MAX_ATTEMPTS).toBe(3);
+    expect(loadConfig().RETRY_CLOCKIN_CUTOFF).toBe("12:00");
+    expect(loadConfig().RETRY_CLOCKOUT_CUTOFF).toBe("23:00");
+  });
+
+  it("refuses to boot on a malformed RETRY cutoff, naming the key and the fix", () => {
+    process.env["RETRY_CLOCKIN_CUTOFF"] = "noon";
+    expect(() => loadConfig()).toThrow(/RETRY_CLOCKIN_CUTOFF/);
+    expect(() => loadConfig()).toThrow(/HH:mm/);
+    delete process.env["RETRY_CLOCKIN_CUTOFF"];
+
+    process.env["RETRY_CLOCKIN_CUTOFF"] = "25:00";
+    expect(() => loadConfig()).toThrow(/RETRY_CLOCKIN_CUTOFF/);
+    expect(() => loadConfig()).toThrow(/range/);
+    delete process.env["RETRY_CLOCKIN_CUTOFF"];
+
+    process.env["RETRY_CLOCKOUT_CUTOFF"] = "12:60";
+    expect(() => loadConfig()).toThrow(/RETRY_CLOCKOUT_CUTOFF/);
+  });
+
+  it("cleans up the RETRY_* env keys it sets", () => {
+    // restoreEnv() only restores keys that existed at module load; keys a test
+    // ADDED must be removed explicitly or they leak into later tests.
+    delete process.env["RETRY_INTERVAL_MINUTES"];
+    delete process.env["RETRY_MAX_ATTEMPTS"];
+    delete process.env["RETRY_CLOCKIN_CUTOFF"];
+    delete process.env["RETRY_CLOCKOUT_CUTOFF"];
+    expect(loadConfig().RETRY_CLOCKIN_CUTOFF).toBe("12:00");
+  });
 });
 
 describe("config: TRUSTED_CLOUDFLARE_PEERS validation (phase-8 hardening F2)", () => {
