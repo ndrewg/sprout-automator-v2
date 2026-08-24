@@ -93,6 +93,8 @@ State plainly in both: **a missed-run alert means "the automation didn't run", n
 
 `navigateToPortal` already retries 3× on server errors, so this covers failures *past* navigation: login timeouts, OTP never arriving, the clock dialog not appearing. One retry at +10 minutes, hard cap of two attempts, **only for `failure`** — never `skipped`, or a fail-safe verification skip turns into repeated clock attempts, which is exactly the double-clock the guard exists to prevent. Needs an `attempt` column on `runs` and care with the partial unique index so a retry can't collide with its own predecessor.
 
+> **Promoted to [`phases/phase-14-retry.md`](./phases/phase-14-retry.md) (2026-08-14), after a real clock-in failed because HRHub was unreachable and nothing retried.** The spec keeps the `failure`-only constraint above and adds what the operator asked for: a configurable interval, an attempt cap **and** an independent wall-clock cutoff (a clock-in recorded at 14:00 is a wrong record, not a late one), self-cancellation on success or a manual run, and deliberate notification discipline — one message on first failure, one on success or give-up, silence between attempts. **Stated limit:** this recovers from *HRHub* being down, not from *this stack* being down; that is phase 12's dead-man's-switch.
+
 ## 8. Admin visibility
 
 **You currently learn a colleague's automation is broken when they tell you.** `users.is_admin` exists, is returned by `publicUser`, and gates nothing (`phase-4-security.md` § 4B.7 sketches it). Minimum useful version: an admin-only read endpoint listing each user's last run per action with status and timestamp. Not impersonation, not credential access — just "whose automation is failing". Rank rises sharply the moment anyone else is using this.
@@ -187,7 +189,9 @@ Minimum useful version: an admin-only delete that reuses the existing self-servi
 
 **A wrong clock-in, not a missing feature.** `lib/ph-holidays.ts` uses `date-holidays`, whose PH dataset ships **with the package version**. The Philippines regularly declares special non-working days by proclamation part-way through the year; those are not in a dataset published months earlier, so the scheduler treats them as ordinary workdays and clocks everyone in on a holiday.
 
-Phase 7's pause window is the workaround, but it requires the user to know in advance and act — which is what the automation was supposed to remove. Options, cheapest first: a small operator-maintained extra-skip-dates list checked alongside `date-holidays`; a yearly reminder to bump the dependency; or fetching from an official source (most work, most fragile). **Pick one deliberately** — silently relying on a bundled dataset is the current behaviour and it is wrong.
+Phase 7's pause window is the workaround, but it requires the user to know in advance and act — which is what the automation was supposed to remove.
+
+> **Promoted to [`phases/phase-13-holiday-layers.md`](./phases/phase-13-holiday-layers.md) (2026-08-14) — and it is no longer theoretical: a real scheduled run clocked the operator in on a holiday.** Investigation found a bigger, closer defect sitting in front of this one: `lib/ph-holidays.ts:11` skips only `public` and `bank`, but `date-holidays` types Philippine **special (non-working) days** as `optional`, so **eight days in 2026** were treated as ordinary workdays — including **Ninoy Aquino Day, 2026-08-21**. Worse for the long run: the library gives Eid al-Fitr 2026 as a *computed* `2026-03-20`, while the Philippines proclaims Eid after the moon sighting, routinely a day either side — so when they disagree you get a skip on a working day **and** a clock-in on the real holiday. That is the case no bundled dataset can ever get right, and the reason the phase adds an Official Gazette layer that may only ever *add* a skip, never cancel one.
 
 ## 19. No frontend error boundary
 
