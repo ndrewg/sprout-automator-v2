@@ -137,7 +137,7 @@ docker compose config 2>&1 | grep -c "is not set"
 python -c "import yaml;yaml.safe_load(open('.github/workflows/ci.yml'))"
 ```
 
-Baselines to preserve: **161 backend unit / 106 backend integration / 5 frontend unit / 16 e2e.** Higher is expected here; *lower* is a finding.
+Baselines to preserve: **161 backend unit / 106 backend integration / 5 frontend unit / 16 e2e.** Higher is expected here; *lower* is a finding. (The baseline given here predates phases 10/11; the ACTUAL pre-phase-12 baseline is **171 unit / 109 integration / 5 frontend / 16 e2e** — use that. Phase 12 landed at **176 unit / 118 integration / 5 frontend / 16 e2e**.)
 
 **`[manual]` — must not be claimed as passed:**
 
@@ -153,3 +153,11 @@ Baselines to preserve: **161 backend unit / 106 backend integration / 5 frontend
 | 8 | `docker compose logs backend --tail 5` after a day of running | Logs present, and the on-disk log file is bounded |
 
 Commit per the loop in `AGENTS.md` — implementer reports, tester probes, reviewer commits. Tag `phase-12-complete` when the `[manual]` table is filled in, which needs a reboot and a real restore.
+
+> ⚠️ **As-built (2026-08-24):**
+> - **`scripts/rotate-key.ts` was NOT built.** 12C is documentation-only. The spec explicitly offered this off-ramp ("write the manual procedure and stop"); a re-keying script needs key-parameterized crypto on the `copy-verbatim` `lib/encryption.ts` (which currently derives a single module-level `KEY` from ambient env) and a transactional rewrite of every user's `*_enc` rows — enough surface that a subtle bug would lock everyone out, exactly the "half-built script is worse than none" case. The manual procedure in `DEPLOY.md` §9 documents the constraints (app stopped, one transaction, backup first, never log a key/plaintext/ciphertext) and notes that any real re-key must reuse the crypto primitive from `lib/encryption.ts`, tested against a scratch restore.
+> - **`/health` response shape** (12A) is `{ status, service, version, db, scheduler: { registered, enabledInDb, registeredMatchesEnabled, lastFireAt }, queue: { active, waiting, cap }, timestamp }`. `scheduler.lastFireAt` is `null` until the first cron fire (there is no "never fired" instant). `queue` is the run-queue `stats()` (active/waiting/cap) exposed at `routes/runs.ts`.
+> - **Enabled-vs-registered mismatch → degraded** only when `enabledInDb > 0 && registered === 0` (the spec's stated broken case: "backend with enabled schedules but registered: 0"). `registeredMatchesEnabled` is reported for all cases (`enabledInDb === 0 || registered === enabledInDb`), so a partial mismatch is visible in the body even though it does not force 503.
+> - **The dead-DB health test was proven red against the old code**: temporarily restored the hardcoded-`ok`/always-200 handler and the suite failed with `expected 200 to be 503` (and the scheduler/queue assertions), then restored the fix → green.
+> - **`HEARTBEAT_URL`** (12D) uses a **5 s** `AbortSignal.timeout` and a bare GET with no query string/body — nothing identifying. The heartbeat module reads `process.env["HEARTBEAT_URL"]` lazily (config is the production source of truth; the env read lets tests point it anywhere), mirroring `lib/telegram.ts`'s `apiBase()` pattern. The ping is fired from the top of `fireCron` (before the holiday check), so every cron fire pings even on a holiday/pause skip.
+> - **Log rotation** (12E): `json-file`, `max-size: 10m`, `max-file: "3"` (~30 MB cap) on postgres + backend in `docker-compose.yml` and caddy + backend in `docker-compose.prod.yml`. `docker compose config` still emits **0** "is not set" warnings for both the base and the prod overlay.

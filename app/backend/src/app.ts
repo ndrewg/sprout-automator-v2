@@ -19,6 +19,12 @@ import { credentialsRouter } from "./routes/credentials";
 import { runsRouter } from "./routes/runs";
 import { scheduleRouter } from "./routes/schedule";
 import { notificationsRouter } from "./routes/notifications";
+import { runQueue } from "./services/run-queue";
+import {
+  activeScheduleCount,
+  enabledScheduleCount,
+  schedulerLastFireAt,
+} from "./services/scheduler";
 
 // Everything that builds the Express app: middleware order, routers, /health,
 // the static SPA, the SPA catch-all, and the global error handler. Split out of
@@ -94,19 +100,52 @@ app.use("/runs", runsRouter);
 app.use("/schedule", scheduleRouter);
 app.use("/notifications", notificationsRouter);
 
+// /health is intentionally unauthenticated and unthrottled (see the rate-limit
+// comment above): an uptime monitor must be able to probe it without a session
+// or a budget. It must also leak nothing — no emails, no per-user counts, no
+// values derived from a secret. `status` is DERIVED, never literal: it is
+// "ok" only when every check passes, otherwise "degraded", and a failing check
+// responds 503 (not 200) so a monitor can key off the status code alone.
+//
+// The checks (12A):
+//   - db: can we run a trivial query? A down DB is the historical "healthy"
+//     lie — a backend whose only honest field said "down" still answered 200.
+//   - scheduler: does the number of cron schedules REGISTERED in this process
+//     match the number of ENABLED schedules in the database? A backend that
+//     booted but registered zero schedules (and so will never run again) is
+//     broken, and today nothing reports it.
+//   - queue: the run-queue depth, so a wedged queue is visible.
 app.get("/health", async (_req: Request, res: Response) => {
   let dbStatus: "ok" | "down" = "down";
+  let enabledInDb = 0;
   try {
     await db.execute(sql`select 1`);
     dbStatus = "ok";
+    enabledInDb = await enabledScheduleCount();
   } catch (err: unknown) {
     logger.error({ err }, "health DB check failed");
   }
-  res.json({
-    status: "ok",
+
+  const registered = activeScheduleCount();
+  // enabledInDb > 0 but nothing registered means the process never rehydrated
+  // its cron schedules — it is alive but will never run. That is degraded.
+  const scheduleMismatch = enabledInDb > 0 && registered === 0;
+  const registeredMatchesEnabled = enabledInDb === 0 || registered === enabledInDb;
+  const { active, waiting, cap } = runQueue.stats();
+
+  const degraded = dbStatus === "down" || scheduleMismatch;
+  res.status(degraded ? 503 : 200).json({
+    status: degraded ? "degraded" : "ok",
     service: "sprout-automator-backend",
     version: "0.0.0",
     db: dbStatus,
+    scheduler: {
+      registered,
+      enabledInDb,
+      registeredMatchesEnabled,
+      lastFireAt: schedulerLastFireAt(),
+    },
+    queue: { active, waiting, cap },
     timestamp: new Date().toISOString(),
   });
 });

@@ -41,6 +41,13 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
       - caddy_config:/config
+    # Log rotation (phase 12E): bound the on-disk log so an unattended host
+    # doesn't fill its disk. 10 MB x 3 keeps ~30 MB max.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - sprout-net
 
@@ -55,6 +62,7 @@ services:
       SIGNUP_ALLOWED: ${SIGNUP_ALLOWED:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       MAIL_FROM: ${MAIL_FROM:-}
+      HEARTBEAT_URL: ${HEARTBEAT_URL:-}
       MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-}
       MISSED_RUN_GRACE_MINUTES: ${MISSED_RUN_GRACE_MINUTES:-}
       AUTH_RATE_LIMIT: ${AUTH_RATE_LIMIT:-}
@@ -62,6 +70,14 @@ services:
     # `!reset` EMPTIES the base file's ports list on merge instead of appending
     # to it — the backend stops publishing 3000 and only Caddy reaches it.
     ports: !reset []
+    # Log rotation (phase 12E): re-declared here so the production overlay is
+    # self-contained (the base file's backend logging would otherwise merge).
+    # 10 MB x 3 keeps ~30 MB max.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   caddy_data:

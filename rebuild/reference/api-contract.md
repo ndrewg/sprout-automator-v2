@@ -145,7 +145,12 @@ Body: `{ "code": string matching /^\d{4,6}$/ }` (`.strict()`).
 ---
 
 ## Health — `/health`  *(public, unthrottled)*
-- `200 { "status":"ok", "service":"sprout-automator-backend", "version":"0.0.0", "db":"ok"|"down", "timestamp": ISO }`.
+- Healthy: `200 { "status":"ok", "service":"sprout-automator-backend", "version":"0.0.0", "db":"ok", "scheduler": { "registered": number, "enabledInDb": number, "registeredMatchesEnabled": boolean, "lastFireAt": string|null }, "queue": { "active": number, "waiting": number, "cap": number }, "timestamp": ISO }`.
+- **A failing check responds `503`** with `"status":"degraded"` — a monitor keys off the status code alone. The checks (phase 12A):
+  - `db: "down"` → 503 degraded (a down DB previously reported 200/ok — the historical lie).
+  - `scheduler.registered === 0` while `scheduler.enabledInDb > 0` → 503 degraded (backend booted but cron never registered).
+- `scheduler.lastFireAt` is the ISO timestamp of the last scheduler fire (any user, any action), or `null` before the first fire.
+- Deliberately leaks nothing: no emails, no per-user counts, no values derived from a secret.
 
 ---
 

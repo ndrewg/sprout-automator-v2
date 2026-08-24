@@ -6,6 +6,7 @@ import { logger } from "../lib/logger";
 import { isPausedOn, isPhilippineHoliday } from "../lib/ph-holidays";
 import { startRun } from "./runs";
 import { sweepMissedRuns, notifyHolidaySkip } from "./notifications";
+import { pingHeartbeat } from "../lib/heartbeat";
 import type { ClockAction } from "../automation/clock";
 
 type UserTasks = { clockIn: ScheduledTask; clockOut: ScheduledTask };
@@ -13,6 +14,26 @@ type UserTasks = { clockIn: ScheduledTask; clockOut: ScheduledTask };
 // userId -> the two live cron tasks. Module-global on purpose: one scheduler
 // per process.
 const active = new Map<string, UserTasks>();
+
+// Timestamp (ISO) of the last cron fire, any user, any action. Updated at the
+// top of fireCron — the moment cron actually invoked the scheduler — regardless
+// of whether the fire then enqueued a run, skipped a holiday, or was paused.
+// Exposed to /health so an uptime monitor can see cron is alive, not just that
+// the process is up. NULL until the first fire (see 12A).
+let lastFireAt: string | null = null;
+
+export function schedulerLastFireAt(): string | null {
+  return lastFireAt;
+}
+
+/** Count of enabled schedules in the database (what SHOULD be registered). */
+export async function enabledScheduleCount(): Promise<number> {
+  const rows = await db
+    .select()
+    .from(schedules)
+    .where(eq(schedules.enabled, true));
+  return rows.length;
+}
 
 /**
  * "05:30" or "05:30:00" -> "30 5 * * 1-5" (weekdays Mon–Fri).
@@ -106,6 +127,13 @@ export async function fireCron(
   action: ClockAction,
   now: Date = new Date(),
 ): Promise<void> {
+  // Record the fire first — cron is alive whether or not the fire then enqueues
+  // a run. /health reads this as the "scheduler last fired" timestamp (12A).
+  lastFireAt = now.toISOString();
+  // Dead-man's-switch heartbeat: ping outward on EVERY fire, before anything
+  // else. Fire-and-forget and a no-op when HEARTBEAT_URL is unset; a dead or
+  // hanging endpoint can never affect the run (hard rules 2 & 11).
+  pingHeartbeat();
   const holiday = isPhilippineHoliday(now);
   if (holiday) {
     logger.info(

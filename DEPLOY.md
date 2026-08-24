@@ -138,6 +138,7 @@ localhost.
 > ⚠️ **As-built (found 2026-08-11):** the **base** `docker-compose.yml` does not pass most of the keys in this section through to the container — only `NODE_ENV`, `PORT`, `DATABASE_URL`, `APP_ENCRYPTION_KEY`, `SESSION_SECRET`, `DATA_DIR`, `SPROUT_URL` and `TZ`. Setting `APP_URL`, `AUTH_RATE_LIMIT`, `MAIL_FROM`, `MAX_CONCURRENT_RUNS`, `MISSED_RUN_GRACE_MINUTES`, `RESEND_API_KEY` or `SIGNUP_ALLOWED` in `.env` **silently has no effect under Docker**. See `BACKLOG.md` § 4; fix that before relying on any value below.
 > ✅ **Fixed 2026-08-12 (phase 8 §8A).** The base compose now passes every config key through with `${KEY}` interpolation (plus `TRUST_PROXY_HOPS`, phase 8 §8C); an unset key arrives as an empty string, which `config.ts` treats as absent, exactly like a native run. The `docker-compose.prod.yml` overlay only re-declares what it genuinely overrides.
 - `SPROUT_URL`, `MAX_CONCURRENT_RUNS` (drop to 2 on a 2 GB box), `MISSED_RUN_GRACE_MINUTES`, `AUTH_RATE_LIMIT` (raise if the team shares one NAT — `BACKLOG.md` § 3), `TZ=Asia/Manila`, `DATA_DIR`.
+- `HEARTBEAT_URL` — **optional dead-man's-switch (phase 12D).** A URL the app pings on **every scheduler fire** so an external uptime service (UptimeRobot, Better Uptime, a cron-scheduled ping recorder, …) can alert when the pings **stop** — the alarm that would otherwise die with the process it watches. Unset = the feature is off (no requests). The ping is a bare `GET` with a 5 s timeout carrying **no identifying data** (no email/user/run id) and can never affect a run, so a dead or hanging endpoint is harmless. Set it to your monitor's ping URL if you want a "stack is down" alert.
 
 **Not a config item, already handled:** `pino-pretty` is a devDependency the image's `--prod` install omits, so the logger guards the pretty transport (commit `60b99d6`). Don't reintroduce an unguarded transport.
 
@@ -307,6 +308,46 @@ If the scratch DB was created with a different owner than the original dump
 
 ---
 
+## 6.3 Workstation host (Windows) — the actual deployment
+
+The current deployment is a **Windows laptop**, not the Linux VPS the rest of
+this runbook assumes. Docker Desktop runs the stack; everything still applies
+except the host-level tooling, which must be PowerShell, not bash.
+
+**Backup.** Use `scripts/backup.ps1` — the functional twin of `backup.sh`
+(same `pg_dump -Fc` custom format, gzip, `BACKUP_DIR` default `~/backups`,
+`RETENTION_DAYS` prune). Install it as a **Windows Task Scheduler** job, and
+make sure it runs **whether or not you are logged on** (S4U logon type, see the
+script header for the exact `Register-ScheduledTask` invocation). An
+interactive-session task inherits the "Docker Desktop needs a signed-in session"
+problem — the largest risk on this host — so do not use the Interactive logon
+type. On a schedule of 03:00 Asia/Manila:
+
+```powershell
+$action  = New-ScheduledTaskAction -Execute "pwsh.exe" `
+  -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$PWD\scripts\backup.ps1`""
+$trigger = New-ScheduledTaskTrigger -Daily -At 03:00
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable
+$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" `
+  -LogonType S4U -RunLevel Highest
+Register-ScheduledTask -TaskName "SproutBackup" -Action $action `
+  -Trigger $trigger -Settings $settings -Principal $principal -Force
+```
+
+**Restore.** `scripts/restore.ps1 <dump.gz> [scratch-db-name]` — restores into
+a scratch database (never the live one), exactly like `restore.sh`. See §6.2
+for the verify/drop steps.
+
+**Why this host is riskier than the VPS.** The Postgres data lives in a Docker
+named volume (`sprout-pgdata`) on a portable machine that leaves the house, and
+it holds every user's AES-256-GCM-encrypted credentials. **The backup directory
+is your only copy** — store it off-host if you can (§6 ⚑), and keep the
+`APP_ENCRYPTION_KEY` **separately** from the dumps (see §9 — a dump without the
+key is unrecoverable, and a dump stored next to the key is a single-file
+compromise of everyone's credentials).
+
+---
+
 ## 7. Day-2 operations
 
 - **Logs:** `docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f backend` (greppable for `error`). ⚑ If you adopted `pino`, ship logs to a free tier (Axiom / Better Stack) for searchability.
@@ -359,3 +400,73 @@ the container exits. Restore the good value afterwards.
 
 **Backups:** run `scripts/backup.sh`, then `scripts/restore.sh <dump>` and
 confirm the scratch DB's tables, as in §6.
+
+---
+
+## 9. Key custody & rotation — `APP_ENCRYPTION_KEY` — **[manual]**
+
+Every credential a user saves (Sprout password, Gmail App Password) and the
+Telegram bot token is stored **encrypted** with AES-256-GCM using
+`APP_ENCRYPTION_KEY` from the root `.env` (see `reference/crypto-and-otp-specs.md`
+for the exact format). Only `lib/encryption.ts` touches these `*_enc` columns.
+Two consequences, both easy to get wrong:
+
+**1. A database backup without the key is unrecoverable.** The key is **not**
+in the dump. Restoring a dump onto a host with a different (or missing)
+`APP_ENCRYPTION_KEY` produces ciphertext nobody can decrypt — every user would
+have to re-enter their credentials.
+
+**2. A backup stored next to the key is a single-file compromise.** If `.env`
+and the dumps live in the same directory (or the same backup), anyone with that
+one location has both the ciphertext and the key — every user's Sprout and
+Gmail credentials at once.
+
+### Where the key lives and how to keep it
+
+- The key lives in **`APP_ENCRYPTION_KEY`** in the root `.env` (64 hex chars =
+  32 bytes). `setup.ps1`/`setup.sh` generate it on first run.
+- **Store it separately from the database dumps.** For a one-operator
+  deployment the realistic answer is a **password manager** entry holding the
+  key (and `SESSION_SECRET`). The backup directory on disk is not the place for
+  it; an off-host encrypted copy is (§6 ⚑).
+- **Losing the key means every user re-enters their credentials. There is no
+  recovery** — AES-256-GCM cannot be brute-forced, and the plaintext is not
+  stored anywhere. Treat the key like the master password of the whole system.
+
+### Rotation procedure (if the key is ever exposed)
+
+Rotating means decrypting every `*_enc` column with the **old** key and
+re-encrypting with the **new** one. The columns are:
+`credentials.sprout_username_enc`, `credentials.sprout_password_enc`,
+`credentials.gmail_email_enc`, `credentials.gmail_app_password_enc`, and
+`notification_settings.telegram_bot_token_enc`.
+
+The rotation must be done **with the app stopped** and in **one transaction**
+(an interrupted rotation that leaves some rows under one key and some under the
+other locks out everyone). Because the encryption format is the project's own
+AES-256-GCM layout in `lib/encryption.ts` (rule 7: only that module touches
+`*_enc`), the re-key must be performed by a maintainer running a **scripted
+update that uses the same crypto primitive** — never by hand-writing AES in
+psql. The steps:
+
+1. **Stop the app** so no new writes can interleave:
+   `docker compose down` (leave `postgres` up).
+2. **Take a backup and verify it restores** (§6/§6.3). Do not proceed on an
+   unverified backup — a rotation bug plus an unusable backup is the worst
+   outcome.
+3. Run a re-key that, in **one transaction**, selects every `*_enc` column,
+   decrypts with the **old** key, re-encrypts with the **new** key, and updates
+   each row — skipping `NULL` columns. The new key must already be validated as
+   64 hex chars / 32 bytes. **Never log a key, a plaintext credential, or a
+   ciphertext** while doing this (rule 4).
+4. Update `APP_ENCRYPTION_KEY` in `.env` to the new value, update the password
+   manager, then start the app.
+5. **Verify** a real credential round-trips (a user's "Test Gmail connection"
+   succeeds; a test run decrypts) before trusting the rotation.
+
+There is currently **no committed re-keying script** — this procedure is
+documented deliberately rather than shipping a half-built tool, because a
+broken re-key locks every user out (see the phase-12 handoff report for the
+reasoning). If you need to rotate, write the small scripted update described in
+step 3 using the primitives in `lib/encryption.ts`, and test it against a
+scratch restore first.

@@ -88,6 +88,12 @@ const envSchema = z.object({
   // verbatim.
   TRUSTED_CLOUDFLARE_PEERS: z
     .preprocess(emptyToUndefined, z.string().optional()),
+  // Dead-man's-switch heartbeat (phase 12D): an OPTIONAL outbound URL pinged on
+  // every scheduler fire so an external service can alert when the pings stop.
+  // Unset = feature off (no requests, no warnings). Must never carry any
+  // identifying data (no email/user/run id) and must never affect a run.
+  HEARTBEAT_URL: z
+    .preprocess(emptyToUndefined, z.string().url().optional()),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;
