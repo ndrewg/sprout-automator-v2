@@ -1,6 +1,6 @@
-# Phase 15 — Domain, mail and tunnel
+# Phase 16 — Domain, mail and tunnel
 
-> 🧑 **This phase is operator-led, not orchestrator-led.** It begins with a card payment and a Cloudflare dashboard, and most of its verification happens in a browser and a DNS zone. An orchestrator should implement the code half (§ 15B) and then **stop and hand over** — it cannot buy a domain, click through Zero Trust, or confirm an email landed in someone's inbox.
+> 🧑 **This phase is operator-led, not orchestrator-led.** It begins with a card payment and a Cloudflare dashboard, and most of its verification happens in a browser and a DNS zone. An orchestrator should implement the code half (§ 16B) and then **stop and hand over** — it cannot buy a domain, click through Zero Trust, or confirm an email landed in someone's inbox.
 
 **Goal:** make the app reachable at a stable HTTPS hostname and able to send mail, so a second person can actually use it.
 
@@ -12,7 +12,7 @@
 
 ---
 
-## 15A — The purchases and the dashboards `[manual]`
+## 16A — The purchases and the dashboards `[manual]`
 
 **Decided already in `BACKLOG.md` § 12 — do not re-litigate:**
 
@@ -25,7 +25,7 @@
 2. **Resend:** add the domain, copy the SPF/DKIM records it gives into Cloudflare DNS, verify, create an API key. `MAIL_FROM` must be at that domain — `onboarding@resend.dev` only delivers to your own Resend account address and **cannot reach colleagues**.
 3. **Cloudflare Zero Trust → Networks → Tunnels:** create a tunnel, note its token, add a public hostname `sprout.<domain>` routing to `http://backend:3000`.
 
-## 15B — The code half
+## 16B — The code half
 
 **Contract:**
 - **`cloudflared` as a service in `docker-compose.yml`**, on `sprout-net`, so the tunnel starts and stops with the stack rather than being a separate thing to remember. Its token is a secret: it goes in `.env` and reaches the container via `${KEY}` passthrough like everything else (phase 8 § 8A). **Never commit it** — the gitleaks hook is the backstop, not the plan.
@@ -36,7 +36,7 @@
 - **Rewrite `DEPLOY.md` around a tunnel.** It currently documents only a VPS behind Caddy. In this topology **Cloudflare terminates TLS and Caddy is not used at all** — so a reader following the current runbook on Windows gets instructions for a topology that no longer exists. **Keep `docker-compose.prod.yml` and `Caddyfile`**: they stay correct if a VPS ever happens, and deleting them would throw away proven work.
 - No new backend dependency. Nothing here should touch application logic.
 
-**Gate 15B:**
+**Gate 16B:**
 ```
 docker compose config > /dev/null && docker compose config 2>&1 | grep -c "is not set"   # must be 0
 cd app/backend && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration
@@ -62,4 +62,4 @@ Almost all of this is `[manual]` by nature — it is a deployment, not a feature
 
 **Row 5 also closes phase 8's tag.** Row 7 is the one that catches the decaying-address trap.
 
-Commit per the loop in `AGENTS.md` for § 15B. Tag `phase-15-complete` when the table is filled in — and **then go back and tag `phase-8-complete`**, which has been waiting on row 5.
+Commit per the loop in `AGENTS.md` for § 16B. Tag `phase-16-complete` when the table is filled in — and **then go back and tag `phase-8-complete`**, which has been waiting on row 5.

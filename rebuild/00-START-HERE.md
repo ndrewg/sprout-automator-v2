@@ -84,13 +84,14 @@ Read the foundation docs in order once, then work the phases.
 - [`phases/phase-7-schedule-pause.md`](./phases/phase-7-schedule-pause.md) — pause / leave days ✅
 - [`phases/phase-8-environment-and-limits.md`](./phases/phase-8-environment-and-limits.md) — **next**: compose passes all fourteen config keys, `AUTH_RATE_LIMIT` 10→30, real-client-IP keying. Small; **everything else is unconfigurable until 8A ships**
 - [`phases/phase-9-runs-history.md`](./phases/phase-9-runs-history.md) — `GET /runs` limit + `hasMore`, dates + "Show more", Gmail-only copy
-- [`phases/phase-10-dependency-hygiene.md`](./phases/phase-10-dependency-hygiene.md) — **next**: CI is red on `pnpm audit`; bump vitest, upgrade Drizzle off a HIGH advisory, decide what the gate means
-- [`phases/phase-11-holiday-skip-types.md`](./phases/phase-11-holiday-skip-types.md) — the holiday check misses PH special non-working days and **did clock the operator in on 2026-08-21**; next weekday miss is 2026-11-02
-- [`phases/phase-12-durability-and-observability.md`](./phases/phase-12-durability-and-observability.md) — honest `/health`, a backup that runs on Windows, key custody, an outward dead-man's-switch, log rotation
-- [`phases/phase-13-holiday-sourcing.md`](./phases/phase-13-holiday-sourcing.md) — `EXTRA_HOLIDAYS` overrides plus an Official Gazette layer that may only **add** a skip
-- [`phases/phase-14-retry.md`](./phases/phase-14-retry.md) — retry a failed run on an interval, with a cap *and* a cutoff; `failure` only, never `skipped`
-- [`phases/phase-15-domain-mail-tunnel.md`](./phases/phase-15-domain-mail-tunnel.md) — 🧑 **operator-led**: domain, Resend, a named Cloudflare Tunnel, and arming the phase 8 trusted-peer gate
-- [`phases/phase-16-admin-visibility.md`](./phases/phase-16-admin-visibility.md) — admin role + overview. **Last: needs a second user account to be worth anything**
+- [`phases/phase-10-dependency-hygiene.md`](./phases/phase-10-dependency-hygiene.md) ✅
+- [`phases/phase-11-holiday-skip-types.md`](./phases/phase-11-holiday-skip-types.md) ✅
+- [`phases/phase-12-durability-and-observability.md`](./phases/phase-12-durability-and-observability.md) ✅
+- [`phases/phase-13-holiday-sourcing.md`](./phases/phase-13-holiday-sourcing.md) ✅
+- [`phases/phase-14-retry.md`](./phases/phase-14-retry.md) ✅
+- [`phases/phase-15-post-run-remediation.md`](./phases/phase-15-post-run-remediation.md) — **next**: the gazette read must degrade instead of throwing, the suite leak, durable retries, the Gazette URL in config
+- [`phases/phase-16-domain-mail-tunnel.md`](./phases/phase-16-domain-mail-tunnel.md) — 🧑 **operator-led**: domain, Resend, a named Cloudflare Tunnel, arming the phase 8 trusted-peer gate
+- [`phases/phase-17-admin-visibility.md`](./phases/phase-17-admin-visibility.md) — admin role + overview. **Last: needs a second user account**
 
 **Reference (attach to a phase when it says so; reproduce these verbatim):**
 - [`reference/testing-strategy.md`](./reference/testing-strategy.md) — **executable gates; attach to every phase from 6 onward**

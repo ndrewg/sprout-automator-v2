@@ -43,8 +43,8 @@ Work the queue in order without pausing for approval between phases. You cannot 
 
 **Stop for these, and only these:**
 
-- **Phase 15 (Domain, mail & tunnel).** It is marked 🧑 **operator** in the queue. It begins with a card payment and a Cloudflare dashboard. **Never attempt it.** Report that the queue has reached it and stop.
-- **Phase 16 (Admin visibility).** Blocked on a second user account existing, which is blocked on phase 15. Do not build a one-row admin table.
+- **Phase 16 (Domain, mail & tunnel).** It is marked 🧑 **operator** in the queue. It begins with a card payment and a Cloudflare dashboard. **Never attempt it.** Report that the queue has reached it and stop.
+- **Phase 17 (Admin visibility).** Blocked on a second user account existing, which is blocked on phase 16. Do not build a one-row admin table.
 - **A coder that asks a question.** The coder is instructed to stop and ask exactly one specific question rather than invent. That is correct behaviour and has twice saved a phase. **Never answer it yourself and never let it guess** — relay it to the human verbatim and stop.
 - **The fix-round cap** (below).
 - **Anything that would change locked scope** — a decision recorded in `rebuild/02-DECISIONS-AND-ARCHITECTURE.md` or deliberately deferred in `BACKLOG.md`.
@@ -55,9 +55,9 @@ Work the queue top-down, **except**: if **phase 11 (Holiday skip types)** is not
 
 Phase 11 is small and carries a live defect that files a false attendance record; phase 10 is larger, riskier (a nine-minor Drizzle upgrade) and has no deadline. A red CI pipeline is embarrassing; a wrong payroll entry is not recoverable. So a near deadline beats a red pipeline.
 
-**As of 2026-08-24 that exception does not apply** — 2026-08-21 already misfired unfixed, and the next weekday miss is **2026-11-02** (All Souls'). Check `date` yourself rather than trusting this paragraph, and say in your report which branch you took.
+**Phases 10–14 are committed as of 2026-08-24, so this exception no longer applies at all** — — 2026-08-21 already misfired unfixed, and the next weekday miss is **2026-11-02** (All Souls'). Check `date` yourself rather than trusting this paragraph, and say in your report which branch you took.
 
-Otherwise honour the dependencies the queue records: **13 and 14 both require 11**; **16 requires 15**.
+Otherwise honour the dependencies the queue records: **13 and 14 both require 11**; **17 requires 16**.
 
 ## The loop, per phase
 
@@ -88,7 +88,7 @@ Phase 8 genuinely took five rounds and each found something real, so a cap is a 
 
 The subagents verify their own work; you check the things only a coordinator sees.
 
-- **Test counts.** Baseline is **161 backend unit / 106 backend integration / 5 frontend unit / 16 e2e**. Higher is expected when a phase adds tests. **Lower is a finding** — a suite running fewer tests than before has silently stopped testing something. Challenge it rather than accepting it.
+- **Test counts.** The old 161 / 106 / 5 / 16 baseline is **stale and untrustworthy** — the phase 10–14 run never recorded final backend totals and the suite was flaky. Phase 15 § 15B re-establishes it; until then, read the current baseline out of `rebuild/STATE.md` rather than assuming. Higher is expected when a phase adds tests. **Lower is a finding** — a suite running fewer tests than before has silently stopped testing something. Challenge it rather than accepting it.
 - **Scope.** If a diff touches something `BACKLOG.md` records as deliberately deferred, that is scope creep. Send it back.
 - **Config keys.** A new key must appear in `config.ts`, `.env.example` **and both compose files**. An entire phase existed because seven keys reached `.env` and never reached the container.
 - **Migrations.** No committed migration may be edited, ever. A new one only if the phase called for it.
