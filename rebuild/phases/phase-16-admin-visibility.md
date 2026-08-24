@@ -1,10 +1,10 @@
-# Phase 10 — Admin role and visibility
+# Phase 16 — Admin role and visibility
 
 **Goal:** make it possible to be an admin, then give that admin one read-only view answering "whose automation is failing".
 
-**Depends on phases 8 and 9.** 8A must be merged or `ADMIN_EMAILS` will not reach the container. 9B must be merged because **this phase reuses the run-status table it establishes** — building the admin table first means writing it twice.
+**Depends on phases 8, 9 and 15.** Phase 8 § 8A must be merged or `ADMIN_EMAILS` will not reach the container. Phase 9 § 9B must be merged because **this phase reuses the run-status table it establishes** — building the admin table first means writing it twice. Phase 15 is the practical prerequisite: a second person needs working password reset before you would invite them.
 
-**Do not start this phase until a second person has an account.** With one user the overview is a table with one row and zero information. It is specced now so it is ready when it is needed; `BACKLOG.md` § 8 records the ranking.
+**Do not start this phase until a second person has an account.** With one user the overview is a table with one row and zero information. It is specced now so it is ready when it is needed; `BACKLOG.md` § 8 records the ranking, and it is last in the queue for exactly this reason.
 
 **Attach for this session:** `03-CONVENTIONS-AND-GUARDRAILS.md`, `reference/api-contract.md`, `reference/database-schema.md`, `phases/phase-4-security.md` (§ 4A.2 for the allowlist parsing pattern this mirrors, § 4B.7 for the original sketch), `phases/phase-9-runs-history.md` (§ 9B, for the table conventions to reuse).
 
@@ -14,7 +14,7 @@
 
 ---
 
-## 10A — A way to become an admin
+## 16A — A way to become an admin
 
 **The defect is bigger than it looks.** `is_admin` exists in `db/schema.ts:24`, is returned by `publicUser` (`routes/auth.ts:75`), and is typed in `frontend/src/api.ts:19`. **Nothing sets it and nothing reads it.** There is no `requireAdmin`, no admin route, no seed, no grant path — so there is currently no way for anyone, including the operator, to become an admin. The column is inert and permanently `false`.
 
@@ -38,11 +38,11 @@ So the first half of this phase is the grant mechanism. There is nothing to gate
 - An address in the list with no user account boots cleanly.
 - Non-admin → 404. Unauthenticated → 401. Admin → 200.
 
-**Gate 10A:** `cd app/backend && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration`
+**Gate 16A:** `cd app/backend && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration`
 
 ---
 
-## 10B — `GET /admin/overview`
+## 16B — `GET /admin/overview`
 
 **Contract:**
 - Admin-only, behind `requireAuth` then `requireAdmin`, rate-limited under the existing `apiLimiter`.
@@ -58,11 +58,11 @@ So the first half of this phase is the grant mechanism. There is nothing to gate
 - Ordering puts a user with a failed latest run above one with a success.
 - A user with no runs at all appears, with nulls rather than being omitted.
 
-**Gate 10B:** `cd app/backend && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration`
+**Gate 16B:** `cd app/backend && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration`
 
 ---
 
-## 10C — The admin panel
+## 16C — The admin panel
 
 **Contract:**
 - A fifth panel, rendered **only when `me.isAdmin`**. It must not appear, flicker, or reserve space for a non-admin.
@@ -71,7 +71,7 @@ So the first half of this phase is the grant mechanism. There is nothing to gate
 - Empty and error states: a useful message, not a blank table (ui-ux-pro-max § 8 `empty-states`).
 - Responsive: table scrolls inside its container at 375 px; the page never scrolls sideways.
 
-**Gate 10C:** `cd app/frontend && pnpm lint && pnpm build && pnpm exec playwright install chromium && pnpm test:e2e`
+**Gate 16C:** `cd app/frontend && pnpm lint && pnpm build && pnpm exec playwright install chromium && pnpm test:e2e`
 
 ---
 
@@ -94,4 +94,4 @@ docker compose config | grep ADMIN_EMAILS
 | 5 | Admin panel at 375 px | Table scrolls inside its container; the page does not scroll sideways |
 | 6 | Compare the admin table to the runs table | Same date format, same badges, same alignment — they read as one product |
 
-Commit per the loop in `AGENTS.md`. Tag `phase-10-complete` when the `[manual]` rows are filled in.
+Commit per the loop in `AGENTS.md`. Tag `phase-16-complete` when the `[manual]` rows are filled in.

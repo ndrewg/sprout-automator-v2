@@ -1,10 +1,10 @@
-# Phase 11 — Dependency hygiene, and a CI gate you can trust again
+# Phase 10 — Dependency hygiene, and a CI gate you can trust again
 
 **Goal:** get `pnpm audit --audit-level=high` back to green on the backend, and decide deliberately whether it stays a hard CI gate.
 
-**Do this before phase 10.** Phase 10 (admin visibility) is gated on a second person having an account; this is not gated on anything and CI is red until it lands.
+**Do this before phase 16.** Phase 16 (admin visibility) is gated on a second person having an account; this is not gated on anything and CI is red until it lands.
 
-**Attach for this session:** `reference/supply-chain-and-ci.md` (the reasoning behind the audit gate), `03-CONVENTIONS-AND-GUARDRAILS.md`, `reference/testing-strategy.md`, `reference/database-schema.md` (for § 11B).
+**Attach for this session:** `reference/supply-chain-and-ci.md` (the reasoning behind the audit gate), `03-CONVENTIONS-AND-GUARDRAILS.md`, `reference/testing-strategy.md`, `reference/database-schema.md` (for § 10B).
 
 > 📡 **Fetch live docs (Context7):** Drizzle ORM migration/upgrade notes for the 0.36 → 0.45+ range, and the vitest major you install. Do not upgrade an ORM from memory.
 
@@ -39,7 +39,7 @@ Severity: 7 moderate | 9 high | 1 critical
 
 ---
 
-## 11A — Bump the backend test runner (the easy 13)
+## 10A — Bump the backend test runner (the easy 13)
 
 **Contract:**
 - Upgrade `vitest` in `app/backend` from `^2.1.0` to a current major. **Fetch the current version via Context7** and check its Vite peer requirement.
@@ -47,7 +47,7 @@ Severity: 7 moderate | 9 high | 1 critical
 - Watch `app/backend/vitest.config.ts`: the **projects** API (`unit` / `integration`) changed shape across recent majors. `pnpm test` and `pnpm test:integration` must keep meaning exactly what they mean today.
 - `minimumReleaseAge: 1440` in `app/backend/pnpm-workspace.yaml` — the version must be at least 24 h old. If a new build script appears, add it to `allowBuilds` and report it.
 
-**Gate 11A:**
+**Gate 10A:**
 ```
 cd app/backend && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration
 cd app/backend && pnpm audit --audit-level=high
@@ -58,7 +58,7 @@ Record how many of the 17 advisories this clears.
 
 ---
 
-## 11B — Upgrade Drizzle deliberately
+## 10B — Upgrade Drizzle deliberately
 
 **This is the one with real risk.** `drizzle-orm ^0.36.0` → **≥0.45.2**, nine minor versions, on the library that owns the schema, the migrations and every query.
 
@@ -75,7 +75,7 @@ Record how many of the 17 advisories this clears.
 3. **Apply the migrations to a scratch database from empty** and confirm the resulting schema matches: `pnpm db:migrate` against a fresh DB, then diff the table/index/constraint list against the current `sprout` database. A migration runner that silently stops applying old migrations is the failure mode that would not show up in tests.
 4. Confirm the race guard still behaves: `race-guard.test.ts` must still pass **and still be able to fail** — break the partial index expectation and confirm it goes red.
 
-**Gate 11B:**
+**Gate 10B:**
 ```
 cd app/backend && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration
 cd app/backend && pnpm audit --audit-level=high
@@ -85,7 +85,7 @@ cd app/backend && pnpm audit --audit-level=high
 
 ---
 
-## 11C — The three transitive ones
+## 10C — The three transitive ones
 
 `date-holidays`, `mailparser` and `imapflow` each pull a vulnerable transitive (`js-yaml`, `linkify-it`, `ip-address`).
 
@@ -95,11 +95,11 @@ cd app/backend && pnpm audit --audit-level=high
 - Module-ownership rules still hold (AGENTS.md rule 9): `date-holidays` only in `lib/ph-holidays.ts`, `imapflow`/`mailparser` only in `lib/imap-otp.ts`.
 - `ph-holidays.ts` reads `"public"` and `"bank"` holiday types — verify that still behaves after the bump, and that `imap-otp.ts` still connects (`Test Gmail connection` in the UI is the fast check).
 
-**Gate 11C:** same as 11B, plus `pnpm audit --audit-level=high` reporting **0 high, 0 critical**.
+**Gate 10C:** same as 10B, plus `pnpm audit --audit-level=high` reporting **0 high, 0 critical**.
 
 ---
 
-## 11D — Decide what the gate means
+## 10D — Decide what the gate means
 
 **This is the part that stops the problem recurring, and it is a decision, not a code change.**
 
@@ -111,7 +111,7 @@ cd app/backend && pnpm audit --audit-level=high
 
 **Recommendation: `--prod`, blocking**, with the dev-dependency audit run separately and non-blocking so it is still visible. Implement whichever is chosen, and **record the decision and its reasoning in `reference/supply-chain-and-ci.md`** — that document is where the gate came from, and the next person to see a red pipeline needs to know the choice was made on purpose.
 
-**Gate 11D:** `.github/workflows/ci.yml` parses; the backend job's audit step reflects the decision; the reasoning is written down.
+**Gate 10D:** `.github/workflows/ci.yml` parses; the backend job's audit step reflects the decision; the reasoning is written down.
 
 ---
 
@@ -119,7 +119,7 @@ cd app/backend && pnpm audit --audit-level=high
 
 ```
 cd app/backend  && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration
-cd app/backend  && pnpm audit --audit-level=high        # per the 11D decision
+cd app/backend  && pnpm audit --audit-level=high        # per the 10D decision
 cd app/frontend && pnpm lint && pnpm test && pnpm build && pnpm test:e2e
 python -c "import yaml;yaml.safe_load(open('.github/workflows/ci.yml'))"
 ```
@@ -136,4 +136,4 @@ Baselines: **161 backend unit / 106 backend integration / 5 frontend unit / 16 e
 | 4 | "Test Gmail connection" | Still connects after the `imapflow` bump |
 | 5 | Push and open the Actions tab | **Both** jobs green — the point of the phase |
 
-Commit per the loop in `AGENTS.md` — implementer reports, tester probes, reviewer commits. Tag `phase-11-complete` when the `[manual]` rows are filled in.
+Commit per the loop in `AGENTS.md` — implementer reports, tester probes, reviewer commits. Tag `phase-10-complete` when the `[manual]` rows are filled in.

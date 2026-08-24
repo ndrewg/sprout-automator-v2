@@ -14,7 +14,7 @@ Everything known-missing that isn't already a phase file, ordered by *when it wi
 > |---|---|---|
 > | [`phase-8-environment-and-limits.md`](./phases/phase-8-environment-and-limits.md) | compose passthrough + `jar` · `AUTH_RATE_LIMIT` 10→30 · real-client-IP keying | §§ 4, 3 (cheap option) |
 > | [`phase-9-runs-history.md`](./phases/phase-9-runs-history.md) | `GET /runs` limit + `hasMore` · dates + Show more · Gmail-only copy | new · § 5 |
-> | [`phase-10-admin-visibility.md`](./phases/phase-10-admin-visibility.md) | `ADMIN_EMAILS` + `requireAdmin` + overview + panel | § 8 |
+> | [`phase-16-admin-visibility.md`](./phases/phase-16-admin-visibility.md) | `ADMIN_EMAILS` + `requireAdmin` + overview + panel | § 8 |
 >
 > **Phase 9 shipped 2026-08-13** (gates 9A/9B/9C green; `[manual]` checks listed in `reviews/`-style handoff outstanding — dates, Show more, live-run polling, 375px, copy readability). § 5 part 1 (the in-app copy) is closed with it; part 2 (the onboarding one-pager) remains a human deliverable.
 >
@@ -93,13 +93,13 @@ State plainly in both: **a missed-run alert means "the automation didn't run", n
 
 `navigateToPortal` already retries 3× on server errors, so this covers failures *past* navigation: login timeouts, OTP never arriving, the clock dialog not appearing. One retry at +10 minutes, hard cap of two attempts, **only for `failure`** — never `skipped`, or a fail-safe verification skip turns into repeated clock attempts, which is exactly the double-clock the guard exists to prevent. Needs an `attempt` column on `runs` and care with the partial unique index so a retry can't collide with its own predecessor.
 
-> **Promoted to [`phases/phase-14-retry.md`](./phases/phase-14-retry.md) (2026-08-14), after a real clock-in failed because HRHub was unreachable and nothing retried.** The spec keeps the `failure`-only constraint above and adds what the operator asked for: a configurable interval, an attempt cap **and** an independent wall-clock cutoff (a clock-in recorded at 14:00 is a wrong record, not a late one), self-cancellation on success or a manual run, and deliberate notification discipline — one message on first failure, one on success or give-up, silence between attempts. **Stated limit:** this recovers from *HRHub* being down, not from *this stack* being down; that is phase 12's dead-man's-switch.
+> **Promoted to [`phases/phase-14-retry.md`](./phases/phase-14-retry.md) — **phase 14 in the queue** (2026-08-14), after a real clock-in failed because HRHub was unreachable and nothing retried.** The spec keeps the `failure`-only constraint above and adds what the operator asked for: a configurable interval, an attempt cap **and** an independent wall-clock cutoff (a clock-in recorded at 14:00 is a wrong record, not a late one), self-cancellation on success or a manual run, and deliberate notification discipline — one message on first failure, one on success or give-up, silence between attempts. **Stated limit:** this recovers from *HRHub* being down, not from *this stack* being down; that is phase 12's dead-man's-switch.
 
 ## 8. Admin visibility
 
 **You currently learn a colleague's automation is broken when they tell you.** `users.is_admin` exists, is returned by `publicUser`, and gates nothing (`phase-4-security.md` § 4B.7 sketches it). Minimum useful version: an admin-only read endpoint listing each user's last run per action with status and timestamp. Not impersonation, not credential access — just "whose automation is failing". Rank rises sharply the moment anyone else is using this.
 
-> **Specced but gated 2026-08-12.** Fully written up in `phases/phase-10-admin-visibility.md`. **Do not build it until a second person has an account** — with one user the overview is a table with one row and zero information. The phase also documents what the summary above understates: `is_admin` is *inert*, so there is currently no way for anyone to become an admin, and the grant mechanism must be built before any admin surface can exist.
+> **Specced but gated 2026-08-12.** Fully written up in `phases/phase-16-admin-visibility.md` (**phase 16**, last in the queue). **Do not build it until a second person has an account** — with one user the overview is a table with one row and zero information. The phase also documents what the summary above understates: `is_admin` is *inert*, so there is currently no way for anyone to become an admin, and the grant mechanism must be built before any admin surface can exist.
 
 ## 9. OTP submission via Telegram reply
 
@@ -134,6 +134,8 @@ The host is a ThinkPad E14 Gen 5: 40 GB RAM, 12 threads, 565 GB free — **more 
 
 **What it does *not* fix:** the home ISP and laptop uptime become the dependency, and **Docker Desktop needs a logged-in Windows session** — a Windows Update reboot leaves the stack down until someone logs in, which at 05:30 means a missed run for everyone. That is the largest unattended risk on this host and none of the above addresses it.
 
+> **Promoted to [`phases/phase-15-domain-mail-tunnel.md`](./phases/phase-15-domain-mail-tunnel.md) (2026-08-14)** — **phase 15**, marked operator-led because it starts with a card payment and a Cloudflare dashboard. Its code half (cloudflared in compose, arming `TRUSTED_CLOUDFLARE_PEERS`, the `DEPLOY.md` rewrite) still gets gates.
+
 **What it makes obsolete:** Cloudflare terminates TLS, so `docker-compose.prod.yml` + `Caddyfile` (built for a VPS) are unnecessary in this topology, and `DEPLOY.md` would need rewriting around a tunnel. Keep the Caddy artifacts — they stay correct if a VPS ever happens.
 
 ## 13. Runs history row-expand control is not keyboard-reachable
@@ -165,7 +167,7 @@ The host is a ThinkPad E14 Gen 5: 40 GB RAM, 12 threads, 565 GB free — **more 
 
 **On the drizzle one:** "SQL identifiers" means table and column names, which in this codebase come from `db/schema.ts` and are static — every user-supplied value goes through parameter binding. So the app is **most likely not exploitable**; that is reasoning from the advisory's shape, not a proof, and nine minors behind on the library that talks to the database is not a defensible position.
 
-**Specced as [`phases/phase-11-dependency-hygiene.md`](./phases/phase-11-dependency-hygiene.md)** — 11A bump backend vitest (clears most of the noise), 11B upgrade Drizzle deliberately with the 106 integration tests as the safety net, 11C the three transitives, 11D decide what the gate means. **Do it before phase 10**, which is gated on a second user existing while this is gated on nothing.
+**Specced as [`phases/phase-10-dependency-hygiene.md`](./phases/phase-10-dependency-hygiene.md)** — 11A bump backend vitest (clears most of the noise), 11B upgrade Drizzle deliberately with the 106 integration tests as the safety net, 11C the three transitives, 11D decide what the gate means. **It is phase 10, first in the queue** — gated on nothing, while the admin work it used to sit behind is gated on a second user.
 
 **§ 11D is the part that stops the recurrence.** The audit gate *will* go red again on a day nobody committed — that is what a live-advisory check is. The decision to make: keep it blocking, scope it to `--prod` (13 of today's 17 findings do not ship), or make it advisory. Recommendation is `--prod` blocking with a separate non-blocking dev audit, recorded in `reference/supply-chain-and-ci.md`.
 
@@ -191,7 +193,7 @@ Minimum useful version: an admin-only delete that reuses the existing self-servi
 
 Phase 7's pause window is the workaround, but it requires the user to know in advance and act — which is what the automation was supposed to remove.
 
-> **Promoted to [`phases/phase-13-holiday-layers.md`](./phases/phase-13-holiday-layers.md) (2026-08-14) — and it is no longer theoretical: a real scheduled run clocked the operator in on a holiday.** Investigation found a bigger, closer defect sitting in front of this one: `lib/ph-holidays.ts:11` skips only `public` and `bank`, but `date-holidays` types Philippine **special (non-working) days** as `optional`, so **eight days in 2026** were treated as ordinary workdays — including **Ninoy Aquino Day, 2026-08-21**. Worse for the long run: the library gives Eid al-Fitr 2026 as a *computed* `2026-03-20`, while the Philippines proclaims Eid after the moon sighting, routinely a day either side — so when they disagree you get a skip on a working day **and** a clock-in on the real holiday. That is the case no bundled dataset can ever get right, and the reason the phase adds an Official Gazette layer that may only ever *add* a skip, never cancel one.
+> **Promoted to [`phases/phase-11-holiday-skip-types.md`](./phases/phase-11-holiday-skip-types.md) (the urgent filter fix) and [`phases/phase-13-holiday-sourcing.md`](./phases/phase-13-holiday-sourcing.md) (overrides + the Gazette layer), 2026-08-14 — and it is no longer theoretical: a real scheduled run clocked the operator in on a holiday.** Investigation found a bigger, closer defect sitting in front of this one: `lib/ph-holidays.ts:11` skips only `public` and `bank`, but `date-holidays` types Philippine **special (non-working) days** as `optional`, so **eight days in 2026** were treated as ordinary workdays — including **Ninoy Aquino Day, 2026-08-21**. Worse for the long run: the library gives Eid al-Fitr 2026 as a *computed* `2026-03-20`, while the Philippines proclaims Eid after the moon sighting, routinely a day either side — so when they disagree you get a skip on a working day **and** a clock-in on the real holiday. That is the case no bundled dataset can ever get right, and the reason the phase adds an Official Gazette layer that may only ever *add* a skip, never cancel one.
 
 ## 19. No frontend error boundary
 

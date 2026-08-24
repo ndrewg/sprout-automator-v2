@@ -16,7 +16,7 @@ Last reviewed: **2026-08-14**.
 | **4B** | Mailer, password reset, idle timeout, email verification, account deletion | **Nothing** — all 18 `[manual]` checks passed across both rounds | **Tag now** |
 | **L** | oxlint on both packages, CI + pre-commit, four fault probes | **Nothing** — probes proven to fail the build | **Tag now** |
 | **5** | Prod compose, Caddy TLS, `DEPLOY.md`, `APP_URL` guard, backups | VPS host hardening + live-domain TLS — **both need a real host** | **Decide** — see below |
-| **8** | Compose env passthrough, `AUTH_RATE_LIMIT`, real-client-IP keying | A real Cloudflare Tunnel in front | **Blocked** on a domain |
+| **8** | Compose env passthrough, `AUTH_RATE_LIMIT`, real-client-IP keying | A real Cloudflare Tunnel in front | **Blocked** — closes with **phase 15** |
 | **9** | `GET /runs` limit + `hasMore`, dates, Show more, Gmail copy | Onboarding one-pager (a document, not code) | **Tag now** |
 
 ---

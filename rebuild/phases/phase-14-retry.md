@@ -2,7 +2,7 @@
 
 **Goal:** a clock-in that fails at 05:30 because the portal was down should try again on its own, instead of costing the whole day.
 
-**Depends on phase 13.** Retry must consult the same holiday check, so 13A's widened return type must be merged first.
+**Depends on phase 11.** Retry must consult the same holiday check, so phase 11 § 11A's widened return type must be merged first.
 
 **Attach for this session:** `03-CONVENTIONS-AND-GUARDRAILS.md`, `02-DECISIONS-AND-ARCHITECTURE.md` (§ D8 the race guard, § D17 missed-run notices), `phases/phase-7-schedule-pause.md`, `reference/database-schema.md`, `reference/testing-strategy.md`.
 
@@ -37,7 +37,7 @@ A real clock-in failed in August 2026 because HRHub was unreachable. Nothing ret
 - the next scheduled fire for that action,
 - the day rolling over.
 
-**Never retry into a day automation should not run:** re-check both the holiday layer (13A) and `isPausedOn` at each attempt, not only when the retry was scheduled. A pause set at 07:00 must cancel a retry queued at 05:30.
+**Never retry into a day automation should not run:** re-check both the holiday layer (phase 11) and `isPausedOn` at each attempt, not only when the retry was scheduled. A pause set at 07:00 must cancel a retry queued at 05:30.
 
 **Schema:** an `attempt` column on `runs`, new migration, **no edits to committed migrations**. The partial unique index is the subtle part — a retry must not collide with its own predecessor. Insert the retry only once the previous attempt has reached a terminal status, and let Postgres arbitrate (catch `23505` → treat as already-handled) rather than checking first. Never `SELECT WHERE running` then `INSERT` (D8).
 
