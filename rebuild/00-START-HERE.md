@@ -85,6 +85,7 @@ Read the foundation docs in order once, then work the phases.
 - [`phases/phase-8-environment-and-limits.md`](./phases/phase-8-environment-and-limits.md) — **next**: compose passes all fourteen config keys, `AUTH_RATE_LIMIT` 10→30, real-client-IP keying. Small; **everything else is unconfigurable until 8A ships**
 - [`phases/phase-9-runs-history.md`](./phases/phase-9-runs-history.md) — `GET /runs` limit + `hasMore`, dates + "Show more", Gmail-only copy
 - [`phases/phase-11-dependency-hygiene.md`](./phases/phase-11-dependency-hygiene.md) — **next**: backend CI is red on `pnpm audit`; bump vitest, upgrade Drizzle off a HIGH advisory, decide what the gate means
+- [`phases/phase-12-durability-and-observability.md`](./phases/phase-12-durability-and-observability.md) — honest `/health`, a backup that runs on Windows, key custody, an outward dead-man's-switch, log rotation. **Needs no domain**
 - [`phases/phase-10-admin-visibility.md`](./phases/phase-10-admin-visibility.md) — admin role + overview. **Specced but gated on a second user existing**
 
 **Reference (attach to a phase when it says so; reproduce these verbatim):**

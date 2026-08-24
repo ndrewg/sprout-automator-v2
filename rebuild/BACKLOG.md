@@ -177,6 +177,38 @@ The host is a ThinkPad E14 Gen 5: 40 GB RAM, 12 threads, 565 GB free — **more 
 
 ---
 
+## 17. No way to remove a departed colleague's credentials
+
+**Bites the first time someone leaves.** Account deletion is **self-service only** (`routes/auth.ts:422` deletes the caller's own account), and phase 10's admin surface is deliberately read-only. So when a colleague leaves the company, their encrypted Sprout password and Gmail App Password stay in your database indefinitely, and **the only person who could have deleted them is the one who left**.
+
+Minimum useful version: an admin-only delete that reuses the existing self-service teardown path (unregister cron, cascade the eight tables, `removeUserData`, write the surviving `account_deleted` audit row with `emailHash` only). It must **not** require the departing user's password, since the existing flow re-confirms it. Ranks with phase 10 — build it when the admin surface exists, not before.
+
+## 18. Philippine proclamation holidays are not in the bundled dataset
+
+**A wrong clock-in, not a missing feature.** `lib/ph-holidays.ts` uses `date-holidays`, whose PH dataset ships **with the package version**. The Philippines regularly declares special non-working days by proclamation part-way through the year; those are not in a dataset published months earlier, so the scheduler treats them as ordinary workdays and clocks everyone in on a holiday.
+
+Phase 7's pause window is the workaround, but it requires the user to know in advance and act — which is what the automation was supposed to remove. Options, cheapest first: a small operator-maintained extra-skip-dates list checked alongside `date-holidays`; a yearly reminder to bump the dependency; or fetching from an official source (most work, most fragile). **Pick one deliberately** — silently relying on a bundled dataset is the current behaviour and it is wrong.
+
+## 19. No frontend error boundary
+
+**A React render error is a white screen.** Nothing in `app/frontend/src/` implements `ErrorBoundary` or `componentDidCatch`. For the operator that means a console dive; for a colleague it means "the app is broken" with nothing useful to report and no way to recover except a reload they may not think to try.
+
+One boundary around the dashboard, showing what failed and a reload affordance, plus a boundary around each panel so one bad panel does not blank the page. Small, and it changes the worst-case user experience from a blank screen to a sentence.
+
+## 20. Nothing keeps dependencies current, so phase 11 will recur
+
+No `renovate.json`, no `.github/dependabot.yml`. Phase 11 exists precisely because `pnpm audit` drifted red on its own with no commit behind it — and without automation it will drift red again, and the next session will again find CI failing for reasons nobody caused.
+
+Renovate or Dependabot, grouped and on a slow cadence (weekly or monthly) so it is a small habit rather than a flood. Note the interaction with `minimumReleaseAge: 1440` in both `pnpm-workspace.yaml` files — a bot that proposes same-day releases will fight that setting, so configure it to respect the same delay. Do this **after** phase 11, so the bot starts from a clean baseline rather than opening seventeen PRs on day one.
+
+## 21. Nothing records that anyone consented
+
+**Your exposure, not the app's.** The tool logs in as other people using their credentials and clocks them under their identity, against payroll. § 5's one-pager *says* accuracy remains their responsibility; nothing records that anyone read it or agreed.
+
+Minimum version: a short acknowledgement at signup — what is stored, that it is encrypted, that it clocks *you* in under *your* credentials, and that accuracy stays yours — with a timestamped `consent_accepted` row in the existing `audit_log`. Cheap, and it turns a verbal understanding into a record. Ranks the moment a second person signs up.
+
+---
+
 ## Closed
 
 - ~~Session hardening leftovers~~ — idle timeout, password reset, email verification and account deletion all shipped in 4B. Data export was deliberately skipped.
