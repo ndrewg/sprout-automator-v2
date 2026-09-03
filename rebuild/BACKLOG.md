@@ -223,6 +223,14 @@ Renovate or Dependabot, grouped and on a slow cadence (weekly or monthly) so it 
 
 Minimum version: a short acknowledgement at signup — what is stored, that it is encrypted, that it clocks *you* in under *your* credentials, and that accuracy stays yours — with a timestamped `consent_accepted` row in the existing `audit_log`. Cheap, and it turns a verbal understanding into a record. Ranks the moment a second person signs up.
 
+## 22. Two config-list validators duplicate their boot-refusal formatter
+
+**Found 2026-09-03 (`improve-codebase-architecture` review) — low priority, cosmetic duplication, not a defect.** `lib/extra-holidays.ts`'s `invalidEntry` helper and `lib/trusted-peers.ts`'s equivalent both independently reimplement the same shallow formatting logic for a boot-refusal message: cap the entry length, escape it, name the 1-based position. Written twice because each was added in its own phase (11 and 8) with no shared home for "how a boot-refusal names its bad entry."
+
+**Not a call to unify the validators themselves** — `trusted-peers.ts` does real CIDR bigint arithmetic across IPv4/IPv6 and `extra-holidays.ts` does simple date parsing; forcing a shared parser would make both shallower, not deeper. `lib/signup-allowlist.ts` doesn't even validate-or-refuse, so it has nothing to share. The narrow fix: extract just the formatter — something like `describeInvalidEntry(position, rawEntry, reason)` — into a small shared `lib/config-list-errors.ts`, so the next override list (there will likely be one) reuses a tested formatter instead of writing a third copy. Low urgency; roll it into whatever next touches either file.
+
+> **Note (same review, no action taken):** the review also checked whether `services/notifications.ts` (547 lines, touched by nearly every phase since 6) was becoming a God-module. It isn't — pure rendering, dispatch, holiday-skip notices, and the injected `SweepDeps` seam are cleanly separated and each independently tested (714-line test file). Deleting it would concentrate real complexity elsewhere, so it passes the deletion test as a properly deep module; the growth (a new `DispatchKind` per phase) is organic breadth in one coherent responsibility, not a wrong boundary. Flagged here only so a future review doesn't have to re-derive this — re-check if it crosses ~800 lines or a phase struggles to add a toggle cleanly.
+
 ---
 
 ## Closed
