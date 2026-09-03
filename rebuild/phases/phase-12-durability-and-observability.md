@@ -110,6 +110,17 @@ There is also no rotation path. If the key is ever exposed, there is no way to r
 
 **Gate 12D:** `cd app/backend && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration`
 
+> ⚠️ **As-built gap (found 2026-09-03, from a real run-history audit):** the ping side shipped, but **the monitor side has an assumption this deployment breaks.** "Alert when the pings stop" silently assumes the stack is meant to be always-on. It isn't — **the operator shuts the automator down after Friday's clock-out**, and over holidays. A deliberate shutdown is indistinguishable from a Windows Update reboot, so a naive interval check would fire every Friday evening, every long weekend and every closed lid.
+>
+> That is not a cosmetic annoyance: **a monitor that cries wolf is one you mute, which is the exact failure this gate exists to prevent.** It would ship as a feature and end up as noise.
+>
+> Options, best first:
+> - **Give the external check a weekday cron schedule, not a bare interval.** Most services (healthchecks.io and equivalents) accept a cron expression plus a grace. Match the scheduler's own `1-5` weekday filter — it already knows which days it intends to run, so the monitor should encode the same thing rather than a different one.
+> - **Ping on deliberate shutdown too**, so only *unexpected* silence alerts. Needs a graceful-shutdown hook, and it fails silently if the process is killed rather than stopped.
+> - **A grace window wide enough to span a long weekend.** Simplest, and the weakest: it also blinds you to a genuine three-day outage, which is precisely the case worth catching.
+>
+> The `[manual]` rows below verify the *ping*. **Whichever option is chosen, the monitor's schedule has to encode "weekdays only, plus PH holidays are expected silence"** — otherwise row 6 passes and the feature is still unusable in practice.
+
 ---
 
 ## 12E — Log rotation

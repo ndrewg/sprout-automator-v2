@@ -23,6 +23,29 @@ Work these **in numeric order**. If a number and this table ever disagree, **the
 
 **Numbering rule.** Completed phases (0–9, T, L) **never renumber** — they have git tags, commit messages and `reviews/phase-N-addendum.md` files pointing at them. Pending phases **are renumbered freely** so their numbers match this queue. When writing, say "phase 12" or "BACKLOG § 12" and never a bare "§ 12": those already mean different things.
 
+## Deployment reality — read before touching the running system
+
+Facts that live nowhere in the code and are easy to get wrong.
+
+**Two hosts, two databases, and they are not in sync.**
+
+| | Role | Repo state | Database |
+|---|---|---|---|
+| **Work PC** | dev / this repo | current | its own `sprout`, own run history |
+| **Laptop** | **the scheduled host** — it does the real clocking | ⚠️ **outdated: pre-phase-10** | its own `sprout`, migrations `0005`–`0007` **not applied** |
+
+**⚠️ Do not `git pull` on the laptop yet.** Pulling gives it phases 10–14 without their migrations, and phase 13's code queries `gazette_holidays` on **every cron fire** with no `try`/`catch`. That table will not exist, so `42P01` propagates out of `resolveHolidayDecision` and takes out all four callers — the cron fire, the missed-run sweep, retry gating and the dashboard. **It would break the automation and the alert that would have told you.** Safe order: phase 15 § 15A lands → phase 15 `[manual]` row 1 (migrate a scratch DB from empty and diff the schema) → *then* pull and apply `0005`, `0006`, `0007`.
+
+Being behind is currently a **safe holding position**: old code, working automation, holiday bug included. The next weekday miss is 2026-11-02, so there is no time pressure.
+
+**Gaps in the laptop's run history are often deliberate.** The operator **shuts the automator down after Friday's clock-out** and over holidays. A stretch of missing runs is not evidence of an outage — **ask before diagnosing one.** (This also breaks phase 12 § 12D's monitor design as specced — see the as-built note there.)
+
+**Confirmed false attendance record: 2026-08-21.** The laptop clocked in at 05:30 on **Ninoy Aquino Day** (`optional` type, which the pre-phase-11 filter ignored) and never clocked out, leaving an open shift on a non-working day. This is the live evidence phase 11 exists for. Resolving it is an HR conversation, not a code change. A second anomaly the same week: 2026-08-20's automated `in` failed while that afternoon's `out` succeeded.
+
+**One thing that did work, unattended:** on 2026-08-20 the OTP retry acquired a *second* code four seconds after the first submission failed — structurally impossible before `a2f26f6`'s per-attempt `AbortController`. The run still failed past the OTP step (`Login failed — could not reach dashboard`), which is the live case phase 14's retry covers.
+
+---
+
 **An orchestrator can carry a phase through implement → test → review, but it cannot fill a `[manual]` table.** Where the *Blocked on* column names a `[manual]`, the code can land and be committed; only the tag waits for a human.
 
 ---
