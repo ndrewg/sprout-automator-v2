@@ -11,7 +11,7 @@ You are implementing the Sprout Automator from the spec in `rebuild/`. **All arc
 - Emit **complete files**. Never write "// rest unchanged".
 - If the spec is ambiguous or missing something, **stop and ask one specific question** — do not invent.
 - **Ignore any `_archive/`, `archive/`, or `reference-old/` directory.** Stale prior-build code using patterns this spec has **superseded** (`.js` import extensions, hardcoded holiday maps). Never read it to decide how to build; never copy from it. The only source of truth is `rebuild/`.
-- **Phases 0–5 are an as-built record, not instructions.** They document what was built and why, including corrections found during the build. Read them for context; don't re-run them. New work is phase 6+ and `rebuild/BACKLOG.md`.
+- **Phases 0–14 are an as-built record, not instructions.** They document what was built and why, including corrections found during the build. Read them for context; don't re-run them. **New work is phase 15+**, in the order the queue table at the top of `rebuild/STATE.md` gives — that table is the authority, not the numbers on disk. Pending phases get renumbered when the queue changes; completed ones never do.
 - **Phase 3 UI — two skills, distinct lanes:** the **`shadcn` skill** is the authority for shadcn component work (init/add/docs/compose + styling rules; v4-aware; injects project context — it wins on shadcn specifics); **`ui-ux-pro-max`** is for design decisions + `Platform: Web` UX/responsive review. Context7 = docs for everything else. The dashboard must be **responsive** (used on phones); apply ui-ux-pro-max's `Platform: Web` rules and **skip** its React-Native / native-only rules (44pt touch, safe-area, haptics, VoiceOver).
 
 ## Model routing

@@ -113,6 +113,10 @@ Phase 6 landed the transport, the settings row and the routes, so the channel ex
 
 `04-STACK-SCAFFOLD-AND-CONFIG.md` still names Vite 6 / TS 5.6 as targets; as-built is Vite 8 / TS 6. A note was added at the top of that file, but the dependency block below it still reads as though 6 were the target.
 
+> **Re-scoped 2026-09-03 (doc-sync audit).** The drift is wider than this entry said — **8 occurrences of "Vite 6" across four files**: `04-STACK-SCAFFOLD-AND-CONFIG.md` (3, including the `"vite": "^6"` dependency block at :387), `02-DECISIONS-AND-ARCHITECTURE.md` (2), `03-CONVENTIONS-AND-GUARDRAILS.md` (1) and `phases/phase-3-frontend.md` (1). `CLAUDE.md` was corrected in the same audit and now says Vite 8 / TS 6. Phase 3 is a closed as-built record, so its mention can stand as historical intent — but the three foundation docs are read as *current guidance* and should say Vite 8.
+>
+> **Also found: `AGENTS.md` exists twice** — at the repo root and at `rebuild/AGENTS.md`, byte-identical by convention with nothing enforcing it. A 2026-09-03 edit to the root copy diverged them until the audit caught it. Two files that must agree, with no check that they do, is a drift generator: either make `rebuild/AGENTS.md` a one-line pointer to the root, or add a pre-commit check that they match.
+
 ## 11. OTP-fix test debt: a non-discriminating test and an unredacted error path
 
 **Low priority — test-quality debt found in the OTP-retry review (2026-08-11), not a shipping defect.** Don't let either slip into a later refactor:
@@ -207,7 +211,7 @@ Phase 7's pause window is the workaround, but it requires the user to know in ad
 
 One boundary around the dashboard, showing what failed and a reload affordance, plus a boundary around each panel so one bad panel does not blank the page. Small, and it changes the worst-case user experience from a blank screen to a sentence.
 
-## 20. Nothing keeps dependencies current, so phase 11 will recur
+## 20. Nothing keeps dependencies current, so phase 10 will recur
 
 No `renovate.json`, no `.github/dependabot.yml`. Phase 11 exists precisely because `pnpm audit` drifted red on its own with no commit behind it — and without automation it will drift red again, and the next session will again find CI failing for reasons nobody caused.
 

@@ -2,9 +2,9 @@
 
 This `rebuild/` directory is a **complete, self-contained specification** for the Sprout Automator — every decision, contract, selector, and gotcha that was learned the hard way, written down so the implementer never has to guess.
 
-You (the human) are the orchestrator. A coding model is the implementer. These docs are the shared source of truth between you.
+These docs are the shared source of truth between you and the models. **Since 2026-08-24 an `orchestrator` agent (`.opencode/agent/`) drives the loop** — coder → tester → reviewer — reading the queue in `STATE.md`. You are the operator: you own the `[manual]` checks, the tags, and anything involving a card payment or a dashboard.
 
-> **Phases 0–3 and 4A are built.** These docs began as a from-scratch build plan for a local model; that build is done. Read **[`STATE.md`](./STATE.md)** first — it says what actually exists today. Phases 0–5 are now an **as-built record**; new work starts at phase 6 and [`BACKLOG.md`](./BACKLOG.md).
+> **Phases 0–14 are built** (13 and 14 are code-complete with `[manual]` tables outstanding). These docs began as a from-scratch build plan for a local model; that build is long done. Read **[`STATE.md`](./STATE.md)** first — its queue table says what to do next and who can finish it. Phases 0–14 are now an **as-built record**; new work is **phase 15 → 17** plus [`BACKLOG.md`](./BACKLOG.md), and [`TAGS.md`](./TAGS.md) tracks what each untagged phase still needs.
 
 ---
 
