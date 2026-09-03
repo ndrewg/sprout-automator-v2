@@ -49,3 +49,7 @@ _archive/
 Thumbs.db
 
 logs_86137047854/
+
+# Exported run history — real attendance data, never commit
+runs-*.csv
+*-runs.csv

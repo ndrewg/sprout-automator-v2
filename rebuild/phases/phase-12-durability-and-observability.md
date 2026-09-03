@@ -114,12 +114,13 @@ There is also no rotation path. If the key is ever exposed, there is no way to r
 >
 > That is not a cosmetic annoyance: **a monitor that cries wolf is one you mute, which is the exact failure this gate exists to prevent.** It would ship as a feature and end up as noise.
 >
-> Options, best first:
-> - **Give the external check a weekday cron schedule, not a bare interval.** Most services (healthchecks.io and equivalents) accept a cron expression plus a grace. Match the scheduler's own `1-5` weekday filter — it already knows which days it intends to run, so the monitor should encode the same thing rather than a different one.
-> - **Ping on deliberate shutdown too**, so only *unexpected* silence alerts. Needs a graceful-shutdown hook, and it fails silently if the process is killed rather than stopped.
-> - **A grace window wide enough to span a long weekend.** Simplest, and the weakest: it also blinds you to a genuine three-day outage, which is precisely the case worth catching.
+> **Decision (2026-09-03): the external check gets a weekday cron schedule, not a bare interval.** healthchecks.io and equivalents accept a cron expression plus a grace period. **Match the scheduler's own `1-5` weekday filter** — it already knows which days it intends to run, so the monitor must encode the same thing rather than a second, different opinion about when silence is normal.
 >
-> The `[manual]` rows below verify the *ping*. **Whichever option is chosen, the monitor's schedule has to encode "weekdays only, plus PH holidays are expected silence"** — otherwise row 6 passes and the feature is still unusable in practice.
+> Two alternatives were considered and rejected: *pinging on graceful shutdown* (needs a shutdown hook and fails silently when the process is killed rather than stopped — so it is unreliable in exactly the crash case that matters), and *a grace window wide enough for a long weekend* (simplest, but it blinds you to a genuine three-day outage, which is the case worth catching).
+>
+> **Holidays remain a known false positive.** A PH public holiday is expected silence on a weekday, and no cron expression covers a moving proclamation date. Accept the occasional weekday alert on a holiday rather than widening the window — a monitor that is occasionally wrong in the safe direction still works; one that never fires does not.
+>
+> **⚠️ `[manual]` row 6 verifies the *ping*, not the *monitor*.** It can pass while the feature is unusable, because it never exercises the schedule. Row 9 below is the one that closes this.
 
 ---
 
@@ -162,6 +163,7 @@ Baselines to preserve: **161 backend unit / 106 backend integration / 5 frontend
 | 6 | Set `HEARTBEAT_URL` to a real endpoint, wait for a scheduler fire | The external service records the ping and shows the expected schedule |
 | 7 | Point `HEARTBEAT_URL` at a black hole, then run a real clock action | The run completes normally and on time — the heartbeat must be incapable of hurting it |
 | 8 | `docker compose logs backend --tail 5` after a day of running | Logs present, and the on-disk log file is bounded |
+| 9 | **Configure the monitor with a weekday cron + grace, then shut the automator down after a Friday clock-out as usual** | **No alert over the weekend**, and an alert if a *weekday* ping is missed. This is the row that proves the monitor is usable rather than merely wired — row 6 cannot tell the difference |
 
 Commit per the loop in `AGENTS.md` — implementer reports, tester probes, reviewer commits. Tag `phase-12-complete` when the `[manual]` table is filled in, which needs a reboot and a real restore.
 

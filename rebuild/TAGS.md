@@ -21,7 +21,7 @@ Last reviewed: **2026-09-03**.
 | **8** | Compose env passthrough, `AUTH_RATE_LIMIT`, real-client-IP keying | A real Cloudflare Tunnel in front | **Blocked** — closes with **phase 16** |
 | **10** | vitest 4, drizzle-orm 0.45, `pnpm audit --prod` gate | 5 rows — incl. the **from-empty schema diff**, which phase 15 makes row 1 | **Blocked** — see below |
 | **11** | `optional` holidays skip; typed holiday return; skip notice | 3 rows — the real one needs **2026-11-02** | **Wait for the day** |
-| **12** | Truthful `/health`, Windows backup, heartbeat, log rotation | 8 rows — needs a **reboot** and a **real restore** | **Verify then tag** |
+| **12** | Truthful `/health`, Windows backup, heartbeat, log rotation | 9 rows — needs a **reboot**, a **real restore**, and a **weekend** | **Verify then tag** |
 | **13** | `EXTRA_HOLIDAYS` + Official Gazette advisory layer | 5 rows — incl. a real proclamation day and the **next Eid** | **Wait for the day** |
 | **14** | Retry on transient failure — cap + independent cutoff | 7 rows — needs a **live HRHub outage window** | **Verify then tag** |
 
@@ -82,11 +82,13 @@ Five `[manual]` rows, and **row 1 gates the rest**: restore a backup into a scra
 
 The other two rows are checkable now: a `public` holiday must skip **silently** (no Telegram), and a container restart on a holiday must not send a duplicate notice. Forcing the date with `EXTRA_HOLIDAYS` proves the plumbing but **not** the library classification — if you force it, record in the addendum that you did, because a forced pass is weaker evidence.
 
-### 12 — the two rows that need patience
+### 12 — the three rows that need patience
 
 Six of eight are quick: stop Postgres and confirm `/health` returns **503** with `status: "degraded"` (a down DB used to report `200 ok` — that was the lie the phase fixed); start it and confirm `scheduler.registered` matches the enabled schedules; point `HEARTBEAT_URL` at a real endpoint, then at a black hole and confirm a run is unaffected.
 
-Two need real time: **register `backup.ps1` in Task Scheduler, reboot Windows without logging in, and confirm the task still ran** — that is the whole point of "run whether or not the user is logged on" — and **restore that dump into a scratch DB**. A dump nobody has restored is not a backup.
+Three need real time: **register `backup.ps1` in Task Scheduler, reboot Windows without logging in, and confirm the task still ran** — that is the whole point of "run whether or not the user is logged on"; **restore that dump into a scratch DB**, because a dump nobody has restored is not a backup; and **row 9 — configure the monitor with a weekday cron, then shut the automator down after a Friday clock-out as usual and confirm no weekend alert.**
+
+Row 9 is the one to not skip. Row 6 only proves the *ping* fires; it cannot tell you whether the **monitor's** schedule matches a host that is deliberately off every weekend. Get that wrong and the alarm becomes noise you mute — the exact failure phase 12 exists to prevent. The decision is recorded in `phases/phase-12-durability-and-observability.md` § 12D.
 
 ### 13 — mostly waiting on the calendar
 
