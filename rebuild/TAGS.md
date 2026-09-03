@@ -70,6 +70,40 @@ Everything else in phase 8 is verified live: `AUTH_RATE_LIMIT=15` → 16th reque
 
 ---
 
+### 10 — blocked behind phase 15, deliberately
+
+Five `[manual]` rows, and **row 1 gates the rest**: restore a backup into a scratch DB, `pnpm db:migrate` **from empty**, and diff tables/indexes/constraints against live `sprout`. That is the only check that catches a migration runner silently skipping older migrations after the nine-minor Drizzle upgrade — and **three migrations (`0005`, `0006`, `0007`) now sit unapplied on top of that unverified base.**
+
+`phases/phase-15-post-run-remediation.md` promotes it to *its* row 1 for exactly this reason. **Do not apply those migrations to a database holding real encrypted credentials until it passes.** Tag 10 after phase 15's manual table is filled in, not before.
+
+### 11 — the real check is a date
+
+`2026-08-21` (Ninoy Aquino Day) misfired *before* the fix existed, so the honest verification is the next weekday `optional` holiday: **2026-11-02, All Souls' Day**, then 2026-12-08, 12-24 and 12-31.
+
+The other two rows are checkable now: a `public` holiday must skip **silently** (no Telegram), and a container restart on a holiday must not send a duplicate notice. Forcing the date with `EXTRA_HOLIDAYS` proves the plumbing but **not** the library classification — if you force it, record in the addendum that you did, because a forced pass is weaker evidence.
+
+### 12 — the two rows that need patience
+
+Six of eight are quick: stop Postgres and confirm `/health` returns **503** with `status: "degraded"` (a down DB used to report `200 ok` — that was the lie the phase fixed); start it and confirm `scheduler.registered` matches the enabled schedules; point `HEARTBEAT_URL` at a real endpoint, then at a black hole and confirm a run is unaffected.
+
+Two need real time: **register `backup.ps1` in Task Scheduler, reboot Windows without logging in, and confirm the task still ran** — that is the whole point of "run whether or not the user is logged on" — and **restore that dump into a scratch DB**. A dump nobody has restored is not a backup.
+
+### 13 — mostly waiting on the calendar
+
+`EXTRA_HOLIDAYS=<tomorrow>` and `EXTRA_HOLIDAYS=2026-02-31=Nope` (must refuse to boot) are checkable today. The two that matter are not: a **real proclamation day** skipping and being named in the notification, and the **next Eid** skipping on the *proclaimed* date rather than the library's computed one — the case no bundled dataset can get right.
+
+Also worth doing early: block outbound access to the Gazette and confirm a run completes anyway. Phase 15 § 15A exists because a missing gazette **table** currently throws instead of degrading; verify the *network* path separately from that fix.
+
+### 14 — needs an outage you can create
+
+Point `SPROUT_URL` at an unreachable host, let a scheduled run fire, and confirm **one** Telegram naming the next attempt time — not one per attempt. Then restore it before the next attempt and confirm one success message. Leave it unreachable for the whole window and confirm exactly N attempts then **one** give-up.
+
+**Row 6 is the one to be most suspicious of:** force a `skipped` run (already clocked in) and confirm **no retry is scheduled at all**. That constraint is what stops a fail-safe verification skip turning into repeated clock attempts — the double-clock the partial unique index exists to prevent.
+
+Note the standing limitation while you test: pending retries live in memory, so a container restart drops them. Phase 15 § 15C fixes that; until then, don't restart mid-window and conclude the feature is broken.
+
+---
+
 ## After tagging
 
 ```powershell
