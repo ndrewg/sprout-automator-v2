@@ -4,22 +4,21 @@ Tags mark a phase as **provably complete, including its `[manual]` checks**. Exe
 
 Last reviewed: **2026-09-03**.
 
-> ⚠️ **Nothing has been tagged since 2026-08-14.** 4B, L and 9 were marked "tag now" then and still are not tagged — `git tag` shows only 0, 1, 2, 3, 4A2, 6, 7 and T. Phases 10–14 have since shipped their code and joined the queue below. **Eleven phases now sit untagged**, which is the state this file exists to prevent: with nothing tagged, "what was actually finished?" has no answer but prose.
+> **4B, L and 9 were tagged 2026-09-03**, closing the three that had nothing outstanding. Phases 10–14 have since shipped their code and joined the queue below. **Eleven phases now sit untagged**, which is the state this file exists to prevent: with nothing tagged, "what was actually finished?" has no answer but prose.
 
 ## Tagged
 
-`phase-0-complete` · `phase-1-complete` · `phase-2-complete` · `phase-3-complete` · `phase-4A2-complete` · `phase-6-complete` · `phase-7-complete` · `phase-T-complete`
+`phase-0-complete` · `phase-1-complete` · `phase-2-complete` · `phase-3-complete` · `phase-4A2-complete` · **`phase-4B-complete`** · `phase-6-complete` · `phase-7-complete` · **`phase-9-complete`** · **`phase-L-complete`** · `phase-T-complete`
+
+**Applied 2026-09-03: 4B, L and 9.** Each is an annotated tag pointing at the commit where that phase’s code landed (`c453c62`, `4323518`, `114b42f`) — **not** at whatever HEAD was on tagging day, so `git checkout phase-9-complete` gives the right tree. Each message records what was verified and what was deliberately skipped. **Not pushed yet** — `git push --tags`.
 
 ## Untagged
 
 | Phase | What it covers | Outstanding | Action |
 |---|---|---|---|
 | **4A** | Helmet CSP + HSTS, rate limits, trust proxy, body cap (`21a0971`) | One browser check | **Verify then tag** |
-| **4B** | Mailer, password reset, idle timeout, email verification, account deletion | **Nothing** — all 18 `[manual]` checks passed across both rounds | **Tag now** |
-| **L** | oxlint on both packages, CI + pre-commit, four fault probes | **Nothing** — probes proven to fail the build | **Tag now** |
 | **5** | Prod compose, Caddy TLS, `DEPLOY.md`, `APP_URL` guard, backups | VPS host hardening + live-domain TLS — **both need a real host** | **Decide** — see below |
 | **8** | Compose env passthrough, `AUTH_RATE_LIMIT`, real-client-IP keying | A real Cloudflare Tunnel in front | **Blocked** — closes with **phase 16** |
-| **9** | `GET /runs` limit + `hasMore`, dates, Show more, Gmail copy | Onboarding one-pager (a document, not code) | **Tag now** |
 | **10** | vitest 4, drizzle-orm 0.45, `pnpm audit --prod` gate | 5 rows — incl. the **from-empty schema diff**, which phase 15 makes row 1 | **Blocked** — see below |
 | **11** | `optional` holidays skip; typed holiday return; skip notice | 3 rows — the real one needs **2026-11-02** | **Wait for the day** |
 | **12** | Truthful `/health`, Windows backup, heartbeat, log rotation | 8 rows — needs a **reboot** and a **real restore** | **Verify then tag** |
@@ -42,22 +41,6 @@ Open `http://localhost:3000`, open DevTools → Console, and click through all p
 
 ```powershell
 git tag phase-4A-complete
-```
-
-### 4B — nothing outstanding, just tag it
-
-Both rounds recorded all nine `[manual]` checks passing — mailer dev/prod logging, single-use tokens, the 11th-is-429 property, verification links, account deletion refusing while a run is active, the surviving `account_deleted` audit row. Nothing is waiting on you.
-
-```powershell
-git tag phase-4B-complete
-```
-
-### L — nothing outstanding, just tag it
-
-All four fault probes were proven to fail the build, including the fragment-shorthand missing `key` that started the round. `pnpm lint` runs in CI and pre-commit with a zero-warning baseline.
-
-```powershell
-git tag phase-L-complete
 ```
 
 ### 5 — needs a decision, not a check
@@ -84,48 +67,6 @@ The one outstanding check is `reviews/phase-8-addendum.md` § D: put a **real Cl
 Everything else in phase 8 is verified live: `AUTH_RATE_LIMIT=15` → 16th request 429, unset → 31st, 40 forged `CF-Connecting-IP` headers sharing one bucket with the gate off.
 
 **Do not tag until the tunnel exists.** This is the one check that proves § 8C does what it was built for; without it, that gate is only proven to be safely *off*.
-
-### 9 — taggable now
-
-Six of eight `[manual]` rows passed on 2026-08-14 (`reviews/phase-9-addendum.md` § F), including both that only a human could settle: "Show more" surviving the 1.5 s poll, and CI genuinely running the frontend suite.
-
-Row 6 (OTP paste bridge) is **reached but not typed into** — the box rendered for four seconds before IMAP won the race, as designed. Row 7 (the onboarding one-pager) is a document nobody has written; it is tracked at `BACKLOG.md` § 5 part 2 and is not a property of the code.
-
-```powershell
-git tag phase-9-complete
-```
-
-### 10 — blocked behind phase 15, deliberately
-
-Five `[manual]` rows, and **row 1 gates the rest**: restore a backup into a scratch DB, `pnpm db:migrate` **from empty**, and diff tables/indexes/constraints against live `sprout`. That is the only check that catches a migration runner silently skipping older migrations after the nine-minor Drizzle upgrade — and **three migrations (`0005`, `0006`, `0007`) now sit unapplied on top of that unverified base.**
-
-`phases/phase-15-post-run-remediation.md` promotes it to *its* row 1 for exactly this reason. **Do not apply those migrations to a database holding real encrypted credentials until it passes.** Tag 10 after phase 15's manual table is filled in, not before.
-
-### 11 — the real check is a date
-
-`2026-08-21` (Ninoy Aquino Day) misfired *before* the fix existed, so the honest verification is the next weekday `optional` holiday: **2026-11-02, All Souls' Day**, then 2026-12-08, 12-24 and 12-31.
-
-The other two rows are checkable now: a `public` holiday must skip **silently** (no Telegram), and a container restart on a holiday must not send a duplicate notice. Forcing the date with `EXTRA_HOLIDAYS` proves the plumbing but **not** the library classification — if you force it, record in the addendum that you did, because a forced pass is weaker evidence.
-
-### 12 — the two rows that need patience
-
-Six of eight are quick: stop Postgres and confirm `/health` returns **503** with `status: "degraded"` (a down DB used to report `200 ok` — that was the lie the phase fixed); start it and confirm `scheduler.registered` matches the enabled schedules; point `HEARTBEAT_URL` at a real endpoint, then at a black hole and confirm a run is unaffected.
-
-Two need real time: **register `backup.ps1` in Task Scheduler, reboot Windows without logging in, and confirm the task still ran** — that is the whole point of "run whether or not the user is logged on" — and **restore that dump into a scratch DB**. A dump nobody has restored is not a backup.
-
-### 13 — mostly waiting on the calendar
-
-`EXTRA_HOLIDAYS=<tomorrow>` and `EXTRA_HOLIDAYS=2026-02-31=Nope` (must refuse to boot) are checkable today. The two that matter are not: a **real proclamation day** skipping and being named in the notification, and the **next Eid** skipping on the *proclaimed* date rather than the library's computed one — the case no bundled dataset can get right.
-
-Also worth doing early: block outbound access to the Gazette and confirm a run completes anyway. Phase 15 § 15A exists because a missing gazette **table** currently throws instead of degrading; verify the *network* path separately from that fix.
-
-### 14 — needs an outage you can create
-
-Point `SPROUT_URL` at an unreachable host, let a scheduled run fire, and confirm **one** Telegram naming the next attempt time — not one per attempt. Then restore it before the next attempt and confirm one success message. Leave it unreachable for the whole window and confirm exactly N attempts then **one** give-up.
-
-**Row 6 is the one to be most suspicious of:** force a `skipped` run (already clocked in) and confirm **no retry is scheduled at all**. That constraint is what stops a fail-safe verification skip turning into repeated clock attempts — the double-clock the partial unique index exists to prevent.
-
-Note the standing limitation while you test: pending retries live in memory, so a container restart drops them. Phase 15 § 15C fixes that; until then, don't restart mid-window and conclude the feature is broken.
 
 ---
 
