@@ -66,10 +66,10 @@ export async function testImapConnection(
 }
 
 /**
- * Find the most recent Sprout OTP email and extract the 5-digit code.
+ * Find the most recent Sprout OTP email and extract its code.
  * - Search messages newer than `lookbackSeconds` (epoch math).
  * - Pull at most a handful, sort by UID desc.
- * - Look for a 5-digit run inside subject + body text.
+ * - Require an OTP marker, then take the code anchored to it (extractOtpCode).
  */
 export async function fetchLatestOtp(
   creds: ImapCreds,
@@ -105,8 +105,8 @@ export async function fetchLatestOtp(
           // HTML alt: strip tags so digits split across <span>s still match.
           (parsed.html || "").replace(/<[^>]+>/g, " "),
         ].join("\n");
-        const code = extractOtpCode(haystack);
-        if (code && !excludeCodes?.has(code)) {
+        const code = extractOtpCode(haystack, excludeCodes);
+        if (code) {
           return {
             ok: true,
             code,
@@ -156,14 +156,78 @@ export async function pollForOtp(
   throw new Error("IMAP polling timed out: no OTP email arrived");
 }
 
-function extractOtpCode(text: string): string | null {
-  // Sprout OTPs are 5 digits. Accept 4–6 defensively, but prefer 5.
-  // Prefer a digit run surrounded by non-digits (an isolated code, not part
-  // of a longer number).
-  const matches = text.match(/(?<!\d)(\d{4,6})(?!\d)/g);
-  if (!matches || matches.length === 0) return null;
-  const fiveDigit = matches.find((m) => m.length === 5);
-  return fiveDigit ?? matches[0] ?? null;
+// Phrases that mark a message as an OTP notice. The IMAP search is bounded only
+// by date, so WITHOUT this gate any mail landing in the lookback window that
+// happens to carry a 4-6 digit number is read as the code — and because the
+// search sorts UID-descending, a newer unrelated mail beats the real OTP. That
+// is how three consecutive runs submitted a wrong code and were bounced back to
+// the login page on 2026-09-07/08. A message matching none of these is skipped.
+const OTP_MARKERS = [
+  "one-time password",
+  "one time password",
+  "otp",
+  "verification code",
+  "verify your identity",
+  "security code",
+] as const;
+
+const CODE_PATTERN = /(?<!\d)(\d{4,6})(?!\d)/g;
+
+/** How far from a marker a digit run may sit and still be treated as the code. */
+const MAX_MARKER_DISTANCE = 240;
+
+function markerPositions(lowerText: string): number[] {
+  const positions: number[] = [];
+  for (const marker of OTP_MARKERS) {
+    let from = 0;
+    for (;;) {
+      const at = lowerText.indexOf(marker, from);
+      if (at === -1) break;
+      positions.push(at);
+      from = at + marker.length;
+    }
+  }
+  return positions;
+}
+
+/**
+ * Pull the OTP out of a message, anchored to an OTP marker.
+ *
+ * Returns null when the text carries no marker at all — that is the gate that
+ * keeps an unrelated email from being mistaken for an OTP notice. Among the
+ * digit runs close enough to a marker, a 5-digit run wins (Sprout's format),
+ * and within a length class the run nearest a marker wins. Ranking rather than
+ * first-match means a stray number earlier in the mail can no longer outrank
+ * the real code. `excludeCodes` is applied per candidate, so a code already
+ * submitted this run is skipped in favour of the next best in the SAME message.
+ */
+function extractOtpCode(
+  text: string,
+  excludeCodes?: ReadonlySet<string>,
+): string | null {
+  const markers = markerPositions(text.toLowerCase());
+  if (markers.length === 0) return null;
+
+  const candidates: { code: string; distance: number }[] = [];
+  for (const match of text.matchAll(CODE_PATTERN)) {
+    const code = match[1];
+    if (code === undefined || excludeCodes?.has(code)) continue;
+    const at = match.index ?? 0;
+    let distance = Number.POSITIVE_INFINITY;
+    for (const marker of markers) {
+      distance = Math.min(distance, Math.abs(at - marker));
+    }
+    if (distance <= MAX_MARKER_DISTANCE) candidates.push({ code, distance });
+  }
+  if (candidates.length === 0) return null;
+
+  candidates.sort((a, b) => {
+    const aFive = a.code.length === 5 ? 0 : 1;
+    const bFive = b.code.length === 5 ? 0 : 1;
+    if (aFive !== bFive) return aFive - bFive;
+    return a.distance - b.distance;
+  });
+  return candidates[0]?.code ?? null;
 }
 
 function humanizeImapError(err: unknown): string {

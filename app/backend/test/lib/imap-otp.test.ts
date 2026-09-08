@@ -91,3 +91,86 @@ describe("fetchLatestOtp code exclusion", () => {
     expect(result).toEqual({ ok: false, reason: "no_code" });
   });
 });
+
+// --- Marker anchoring (the 2026-09-07/08 production failure) ----------------
+// The IMAP search is bounded only by date, so the inbox handed to
+// fetchLatestOtp contains whatever else arrived in the lookback window. Three
+// consecutive runs submitted a wrong code and were bounced to the login page
+// because an unrelated message won on UID order. A message with no OTP marker
+// must now be skipped outright, and within a message the code must be anchored
+// to a marker rather than being "the first 4-6 digit run".
+
+function makeRawMessage(
+  subject: string,
+  body: string,
+): { source: Buffer; internalDate: Date } {
+  return {
+    source: Buffer.from(
+      `Date: ${new Date().toUTCString()}\r\n` +
+        `From: Someone <someone@example.com>\r\n` +
+        `To: otp-owner@example.com\r\n` +
+        `Subject: ${subject}\r\n` +
+        `\r\n` +
+        `${body}\r\n`,
+    ),
+    internalDate: new Date(),
+  };
+}
+
+describe("fetchLatestOtp marker anchoring", () => {
+  it("ignores a NEWER unrelated email carrying a number and returns the real OTP", async () => {
+    // uid 2 is newest and would have won on UID order alone — this is the
+    // exact shape of the production failure.
+    fakeState.inbox = [
+      makeMessage("12345"),
+      makeRawMessage("Your order has shipped", "Order 98765 is on its way."),
+    ];
+    const result = await fetchLatestOtp(CREDS, 300);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.code).toBe("12345");
+  });
+
+  it("reports no_code when nothing in the window carries an OTP marker", async () => {
+    fakeState.inbox = [
+      makeRawMessage("Your order has shipped", "Order 98765 is on its way."),
+    ];
+    expect(await fetchLatestOtp(CREDS, 300)).toEqual({
+      ok: false,
+      reason: "no_code",
+    });
+  });
+
+  it("ignores a digit run too far from the marker to be the code", async () => {
+    fakeState.inbox = [
+      makeRawMessage(
+        "Sprout notice",
+        `verification code${" filler".repeat(60)} 55555`,
+      ),
+    ];
+    expect(await fetchLatestOtp(CREDS, 300)).toEqual({
+      ok: false,
+      reason: "no_code",
+    });
+  });
+
+  it("prefers the 5-digit code over a nearer 4-digit number", async () => {
+    fakeState.inbox = [
+      makeRawMessage(
+        "Sprout verification code",
+        "Your verification code for 2026 is 12345.",
+      ),
+    ];
+    const result = await fetchLatestOtp(CREDS, 300);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.code).toBe("12345");
+  });
+
+  it("still accepts a 6-digit code when no 5-digit run is present", async () => {
+    fakeState.inbox = [
+      makeRawMessage("Sprout", "Your one-time password is 123456."),
+    ];
+    const result = await fetchLatestOtp(CREDS, 300);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.code).toBe("123456");
+  });
+});
