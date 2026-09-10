@@ -53,3 +53,6 @@ logs_86137047854/
 # Exported run history — real attendance data, never commit
 runs-*.csv
 *-runs.csv
+
+# Saved email evidence (OTP mails carry codes and addresses)
+*.eml

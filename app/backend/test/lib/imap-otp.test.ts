@@ -20,8 +20,15 @@ vi.mock("imapflow", () => ({
     async getMailboxLock(): Promise<{ release: () => void }> {
       return { release: () => {} };
     }
-    async search(): Promise<number[]> {
-      return fakeState.inbox.map((_, i) => i + 1);
+    async search(query?: { from?: string }): Promise<number[]> {
+      const wanted = query?.from?.toLowerCase();
+      return fakeState.inbox
+        .map((_, i) => i + 1)
+        .filter((uid) => {
+          if (!wanted) return true;
+          const msg = fakeState.inbox[uid - 1];
+          return msg ? msg.source.toString().toLowerCase().includes(wanted) : false;
+        });
     }
     async fetchOne(uid: string) {
       return fakeState.inbox[Number(uid) - 1];
@@ -172,5 +179,54 @@ describe("fetchLatestOtp marker anchoring", () => {
     const result = await fetchLatestOtp(CREDS, 300);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.code).toBe("123456");
+  });
+});
+
+// --- Sender scoping ---------------------------------------------------------
+// The marker gate alone cannot separate two messages that BOTH look like OTP
+// notices. Scoping the IMAP search to Sprout's own sender does, and that sender
+// (no-reply@sprout.ph) was finally captured from a real OTP mail on 2026-09-10.
+// makeMessage above deliberately uses a NON-matching sender (…@sprout.io) so the
+// marker-anchoring tests keep exercising the date-only fallback path.
+
+function makeSproutMessage(code: string): {
+  source: Buffer;
+  internalDate: Date;
+} {
+  return {
+    source: Buffer.from(
+      `Date: ${new Date().toUTCString()}\r\n` +
+        `From: Sprout HR <no-reply@sprout.ph>\r\n` +
+        `To: otp-owner@example.com\r\n` +
+        `Subject: One-Time Password(OTP) for Sprout HR\r\n` +
+        `\r\n` +
+        `Enter the following OTP to finish logging in to Sprout HR ${code}\r\n`,
+    ),
+    internalDate: new Date(),
+  };
+}
+
+describe("fetchLatestOtp sender scoping", () => {
+  it("prefers Sprout's sender over a NEWER OTP-shaped mail from someone else", async () => {
+    // uid 2 is newer AND carries an OTP marker, so the marker gate alone would
+    // hand back 99999. Only sender scoping picks the real one.
+    fakeState.inbox = [
+      makeSproutMessage("30415"),
+      makeRawMessage("Your verification code", "Your verification code is 99999"),
+    ];
+    const result = await fetchLatestOtp(CREDS, 300);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.code).toBe("30415");
+  });
+
+  it("falls back to a date-only scan when nothing matches Sprout's sender", async () => {
+    // If Sprout ever changes address, the filtered search returns nothing and
+    // the poller must still work rather than never finding a code again.
+    fakeState.inbox = [
+      makeRawMessage("Your verification code", "Your verification code is 24680"),
+    ];
+    const result = await fetchLatestOtp(CREDS, 300);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.code).toBe("24680");
   });
 });

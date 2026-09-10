@@ -1,5 +1,6 @@
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
+import { logger } from "./logger";
 
 export type ImapCreds = {
   email: string;
@@ -26,6 +27,8 @@ export type PollForOtpOptions = {
 
 const IMAP_HOST = "imap.gmail.com";
 const IMAP_PORT = 993;
+// Sprout HR's OTP sender, confirmed from a real OTP mail on 2026-09-10.
+const OTP_SENDER = "no-reply@sprout.ph";
 
 function makeClient(creds: ImapCreds): ImapFlow {
   return new ImapFlow({
@@ -67,7 +70,8 @@ export async function testImapConnection(
 
 /**
  * Find the most recent Sprout OTP email and extract its code.
- * - Search messages newer than `lookbackSeconds` (epoch math).
+ * - Search Sprout-sender mail newer than `lookbackSeconds`, falling back to
+ *   a date-only scan if the sender never matches.
  * - Pull at most a handful, sort by UID desc.
  * - Require an OTP marker, then take the code anchored to it (extractOtpCode).
  */
@@ -82,7 +86,18 @@ export async function fetchLatestOtp(
     const lock = await client.getMailboxLock("INBOX");
     try {
       const since = new Date(Date.now() - lookbackSeconds * 1000);
-      const uids = await client.search({ since }, { uid: true });
+      // Scope the search to Sprout's OTP sender. Bounded by date alone, ANY
+      // mail arriving inside the lookback window competes on UID order, and a
+      // newer unrelated message wins — that is what submitted a wrong code on
+      // 2026-09-07..10. Sender confirmed from a real OTP mail on 2026-09-10.
+      let uids = await client.search({ since, from: OTP_SENDER }, { uid: true });
+      if (!uids || uids.length === 0) {
+        // Sprout may have changed the address — fall back to a date-only scan
+        // rather than never finding a code. extractOtpCode's OTP-marker gate
+        // still guards this path, so the fallback is narrower than the old
+        // behaviour even though it is wider than the filtered search.
+        uids = await client.search({ since }, { uid: true });
+      }
       if (!uids || uids.length === 0) {
         return { ok: false, reason: "no_message" };
       }
@@ -99,6 +114,7 @@ export async function fetchLatestOtp(
         // Decode MIME so base64/quoted-printable bodies become readable text.
         const parsed = await simpleParser(msg.source);
         const subject = parsed.subject ?? msg.envelope?.subject ?? "";
+        const from = parsed.from?.text ?? "";
         const haystack = [
           subject,
           parsed.text ?? "",
@@ -107,6 +123,11 @@ export async function fetchLatestOtp(
         ].join("\n");
         const code = extractOtpCode(haystack, excludeCodes);
         if (code) {
+          // Sender and subject ONLY — never the code itself (hard rule 4).
+          // This is what makes the next wrong-code incident self-diagnosing:
+          // it names the message the code was taken from, which is precisely
+          // the evidence the 2026-09 investigation did not have.
+          logger.info({ from, subject }, "OTP code taken from message");
           return {
             ok: true,
             code,
