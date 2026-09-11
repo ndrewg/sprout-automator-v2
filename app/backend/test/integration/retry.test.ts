@@ -196,6 +196,18 @@ describe("retry on transient failure", () => {
         .limit(1);
       expect(failed?.status).toBe("failure");
 
+      // The real executor failure above ALSO schedules a retry, and finalizeRun
+      // has no injected clock, so it anchors on the wall clock. Before the 12:00
+      // cutoff that leaves a pending retry (making the anchored call below a
+      // deliberate no-op) and a "will retry" dispatch naming the real time —
+      // which is why the 06:05 assertion below only passed in the afternoon.
+      // Reset both so what follows measures the injected morning anchor, which
+      // is the property this half of the test exists for.
+      clearPendingRetries();
+      (
+        notificationsModule.dispatch as unknown as ReturnType<typeof vi.fn>
+      ).mockClear();
+
       // The scheduling decision, anchored at a morning failure.
       const morning = todayAtManila(5, 35);
       const failedRow = await getRunRow(run.id);

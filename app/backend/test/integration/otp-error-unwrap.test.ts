@@ -24,6 +24,19 @@ vi.mock("../../src/automation/runAutomation", () => ({
   runAutomation: vi.fn(),
 }));
 
+// Phase 14's retry changes WHICH notification a failure sends: before
+// RETRY_CLOCKIN_CUTOFF (12:00) a retryable failure sends "🔁 will retry", which
+// carries no error detail, and only a terminal failure sends the ⚠️ message
+// asserted at the end of this test. That made this pass in the afternoon and
+// fail in the morning. Stub the scheduler so the failure is terminal whatever
+// time the suite runs — retry scheduling has its own test file.
+vi.mock("../../src/services/retry", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/services/retry")>()),
+  // "none" = no retry scheduled, so finalizeRun sends the standard failure ⚠️
+  // (notifyFailure = outcome === "none"), which is the message under test.
+  scheduleRetryOnFailure: vi.fn(async () => "none" as const),
+}));
+
 import { runAutomation } from "../../src/automation/runAutomation";
 
 type Recording = {
