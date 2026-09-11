@@ -3,6 +3,7 @@ import {
   launchBrowser,
   saveUserStorageState,
 } from "./browser";
+import { clearUserStorageState } from "../lib/paths";
 import {
   isAlreadyClockedForToday,
   performClockAction,
@@ -77,16 +78,33 @@ export async function runAutomation(args: RunArgs): Promise<AutomationResult> {
       loggedIn = await isLoggedIn(page);
 
       if (!loggedIn) {
-        log?.("Login verify failed. Retrying OTP form submission...");
-        const otpAgain = await handleOtp(page, waitForOtpCode, userId, runId, log);
-        if (otpAgain) {
-          loginMethod = "fresh_login_with_otp";
-          await page.waitForTimeout(3000);
-          loggedIn = await isLoggedIn(page);
-        }
+        // The saved session was good enough for Sprout to show an OTP page but
+        // not to complete a login, so the code was rejected and we were bounced
+        // back to the login form. Retrying the OTP against that dead session can
+        // never work — that is exactly how one stale storage-state.json became
+        // five days of failures (2026-09-06..11). Throw the saved session away
+        // and do a full credential login inside this same run.
+        //
+        // Cleared BEFORE the attempt, deliberately: if the recovery throws, the
+        // underlying cause must propagate untouched — an OTP timeout is what the
+        // user needs to see, not a generic "login failed" — and the next run
+        // still starts from a clean slate either way.
+        log?.(
+          "Login verify failed. Discarding the saved session and logging in fresh...",
+        );
+        await clearUserStorageState(userId);
+        await performLogin(page, creds, userId, runId, log);
+        await handleOtp(page, waitForOtpCode, userId, runId, log);
+        loginMethod = "fresh_login_with_otp";
+        await page.waitForTimeout(3000);
+        loggedIn = await isLoggedIn(page);
       }
 
       if (!loggedIn) {
+        // A failed run never reaches saveUserStorageState, so without this the
+        // file that broke this run survives to break the next one, and the one
+        // after that. Clear it so the next run starts from a clean slate.
+        await clearUserStorageState(userId);
         await screenshot(page, userId, runId, "login-failed");
         throw new Error(
           "Login failed — could not reach dashboard. Check screenshots.",

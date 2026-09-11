@@ -43,3 +43,15 @@ export async function fileExists(p: string): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Deletes only the saved Playwright storage state for a user, leaving the rest
+ * of their session dir alone. A saved session that Sprout half-honours — enough
+ * to show an OTP page, not enough to finish logging in — is worse than none at
+ * all: every later run reloads it and fails the same way, and a failed run never
+ * reaches saveUserStorageState to overwrite it. One such file caused five days
+ * of failures (2026-09-06..11). Best-effort; a missing file is not an error.
+ */
+export async function clearUserStorageState(userId: string): Promise<void> {
+  await fs.rm(storageStatePath(userId), { force: true });
+}
