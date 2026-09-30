@@ -1,4 +1,4 @@
-import cron, { type ScheduledTask } from "node-cron";
+import cron, { type ScheduledTask, type TaskContext } from "node-cron";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client";
 import { schedules, type Schedule } from "../db/schema";
@@ -53,6 +53,59 @@ export function timeToCronExpression(time: string): string {
   return `${minute} ${hour} * * 1-5`;
 }
 
+// ---------------------------------------------------------------------------
+// Diagnostic instrumentation (2026-09-30).
+//
+// node-cron v4 emits these events and NOTHING in this app subscribed to them,
+// so a dropped slot was completely silent — which is why three weeks of
+// scheduled runs went missing without a single log line. In particular v4 does
+// NOT run a late task: planBeat() discards any slot whose lateness exceeds
+// `missedExecutionTolerance` (default 1000 ms), emits 'execution:missed', and
+// re-arms for the next slot.
+//
+// `lateByMs` is the number that matters: it is triggeredAt - date, i.e. how
+// far past the scheduled instant the heartbeat actually woke up.
+//
+// Deliberately logs only scalars — TaskContext carries a `task` back-reference
+// that would make the pino payload circular.
+// ---------------------------------------------------------------------------
+const INSTRUMENTED_EVENTS = [
+  "execution:missed",
+  "execution:skipped",
+  "execution:overlap",
+  "execution:failed",
+  "task:stopped",
+] as const;
+
+function instrumentTask(
+  task: ScheduledTask,
+  meta: { userId?: string; action?: string; expression: string },
+): void {
+  for (const event of INSTRUMENTED_EVENTS) {
+    task.on(event, (ctx: TaskContext) => {
+      const scheduled = ctx.date?.getTime();
+      const woke = ctx.triggeredAt?.getTime();
+      logger.warn(
+        {
+          ...meta,
+          event,
+          scheduledFor: ctx.date?.toISOString(),
+          scheduledLocal: ctx.dateLocalIso,
+          triggeredAt: ctx.triggeredAt?.toISOString(),
+          lateByMs:
+            scheduled !== undefined && woke !== undefined
+              ? woke - scheduled
+              : undefined,
+          reason: ctx.reason,
+          errName: ctx.error?.name,
+          errMessage: ctx.error?.message,
+        },
+        "cron task event",
+      );
+    });
+  }
+}
+
 export function registerSchedule(row: Schedule): void {
   // Atomic swap: always clear any existing tasks first.
   unregisterSchedule(row.userId);
@@ -68,6 +121,12 @@ export function registerSchedule(row: Schedule): void {
     () => void fireCron(row.userId, "out"),
     { timezone: "Asia/Manila" },
   );
+  instrumentTask(clockIn, { userId: row.userId, action: "in", expression: inExpr });
+  instrumentTask(clockOut, {
+    userId: row.userId,
+    action: "out",
+    expression: outExpr,
+  });
   active.set(row.userId, { clockIn, clockOut });
   logger.info(
     { userId: row.userId, in: inExpr, out: outExpr, timezone: "Asia/Manila" },
@@ -109,9 +168,13 @@ export async function loadAllSchedules(): Promise<number> {
  * against what did. sweepMissedRuns never throws across the cron boundary.
  */
 export function startMissedRunSweep(): void {
-  cron.schedule("*/5 * * * *", () => void sweepMissedRuns(), {
+  // Instrumented too, on purpose: this task is the CONTROL. It has kept working
+  // while the two daily tasks stopped firing entirely, so whatever it does or
+  // does not report is the baseline the daily tasks are measured against.
+  const sweep = cron.schedule("*/5 * * * *", () => void sweepMissedRuns(), {
     timezone: "Asia/Manila",
   });
+  instrumentTask(sweep, { expression: "*/5 * * * *" });
   logger.info(
     { expression: "*/5 * * * *", timezone: "Asia/Manila" },
     "missed-run sweep registered",
