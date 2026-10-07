@@ -1,5 +1,6 @@
 import cron, { type ScheduledTask, type TaskContext } from "node-cron";
 import { eq } from "drizzle-orm";
+import { config } from "../config";
 import { db } from "../db/client";
 import { schedules, type Schedule } from "../db/schema";
 import { logger } from "../lib/logger";
@@ -106,6 +107,29 @@ function instrumentTask(
   }
 }
 
+// The daily tasks' late-wake tolerance — the root cause of every scheduled run
+// missed since 2026-09-14 (diagnosed 2026-10-07). node-cron v4 sleeps on ONE
+// setTimeout per slot (up to 24h for a daily task) but computes that delay from
+// the wall clock, while setTimeout runs on the monotonic clock. Inside the
+// Docker Desktop WSL2 VM the wall clock gains ~57 s/day on the monotonic one
+// (measured in the container), so a daily timer wakes about a minute late by
+// wall time, planBeat() rejects the slot against the default 1000 ms tolerance,
+// emits execution:missed and re-arms for the next day. Every day. The */5 sweep
+// wakes ~200 ms late, inside the default, which is why it kept working.
+//
+// Tolerance = the missed-run grace window, on purpose: a fire inside it is "on
+// time" by the sweep's own definition (the sweep sees the run and stays quiet),
+// and anything later has already been alerted as missed.
+export function dailyTaskOptions(): {
+  timezone: string;
+  missedExecutionTolerance: number;
+} {
+  return {
+    timezone: "Asia/Manila",
+    missedExecutionTolerance: config.MISSED_RUN_GRACE_MINUTES * 60 * 1000,
+  };
+}
+
 export function registerSchedule(row: Schedule): void {
   // Atomic swap: always clear any existing tasks first.
   unregisterSchedule(row.userId);
@@ -113,13 +137,15 @@ export function registerSchedule(row: Schedule): void {
 
   const inExpr = timeToCronExpression(row.clockInTime);
   const outExpr = timeToCronExpression(row.clockOutTime);
-  const clockIn = cron.schedule(inExpr, () => void fireCron(row.userId, "in"), {
-    timezone: "Asia/Manila",
-  });
+  const clockIn = cron.schedule(
+    inExpr,
+    () => void fireCron(row.userId, "in"),
+    dailyTaskOptions(),
+  );
   const clockOut = cron.schedule(
     outExpr,
     () => void fireCron(row.userId, "out"),
-    { timezone: "Asia/Manila" },
+    dailyTaskOptions(),
   );
   instrumentTask(clockIn, { userId: row.userId, action: "in", expression: inExpr });
   instrumentTask(clockOut, {
