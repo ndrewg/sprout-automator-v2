@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { invalidListEntry, quoteEntry } from "./config-list-errors";
 
 // Peer parsing for the CF-Connecting-IP trust gate (§8C). The gate accepts the
 // header only from peers listed in TRUSTED_CLOUDFLARE_PEERS; this module owns
@@ -76,14 +77,14 @@ export function parseTrustedCloudflarePeers(
         throw invalidEntry(
           position,
           entry,
-          `"${sanitizeEntry(normalized)}" is not a valid IPv4 or IPv6 address`,
+          `"${quoteEntry(normalized)}" is not a valid IPv4 or IPv6 address`,
         );
       }
       if (family === 6 && normalized.includes(".")) {
         throw invalidEntry(
           position,
           entry,
-          `"${sanitizeEntry(normalized)}" embeds an IPv4 address in an IPv6 address — write it in the hex form`,
+          `"${quoteEntry(normalized)}" embeds an IPv4 address in an IPv6 address — write it in the hex form`,
         );
       }
       literals.add(normalized);
@@ -126,7 +127,7 @@ function parseCidr(
     throw invalidEntry(
       position,
       original,
-      `"${sanitizeEntry(addr)}" is not a valid IPv4 or IPv6 address`,
+      `"${quoteEntry(addr)}" is not a valid IPv4 or IPv6 address`,
     );
   }
   // isIP is typed as returning number; the === 0 guard above means it is 4 or 6.
@@ -138,14 +139,14 @@ function parseCidr(
     throw invalidEntry(
       position,
       original,
-      `"${sanitizeEntry(addr)}" embeds an IPv4 address in an IPv6 address — use the plain IPv4 CIDR form`,
+      `"${quoteEntry(addr)}" embeds an IPv4 address in an IPv6 address — use the plain IPv4 CIDR form`,
     );
   }
   if (!/^\d{1,3}$/.test(prefixText)) {
     throw invalidEntry(
       position,
       original,
-      `"/${sanitizeEntry(prefixText)}" is not a numeric CIDR prefix — use a value between 0 and ${MAX_PREFIX[family]}`,
+      `"/${quoteEntry(prefixText)}" is not a numeric CIDR prefix — use a value between 0 and ${MAX_PREFIX[family]}`,
     );
   }
   const prefix = Number(prefixText);
@@ -169,7 +170,7 @@ function parseCidr(
     throw invalidEntry(
       position,
       original,
-      `could not parse "${sanitizeEntry(addr)}" as an IPv${family} address`,
+      `could not parse "${quoteEntry(addr)}" as an IPv${family} address`,
     );
   }
   const bits = BigInt(MAX_PREFIX[family]);
@@ -182,30 +183,18 @@ function parseCidr(
     throw invalidEntry(
       position,
       original,
-      `"${sanitizeEntry(addr)}/${prefix}" has host bits set; use "${network}/${prefix}" to trust the network, or "${sanitizeEntry(addr)}/${MAX_PREFIX[family]}" to trust only that address`,
+      `"${quoteEntry(addr)}/${prefix}" has host bits set; use "${network}/${prefix}" to trust the network, or "${quoteEntry(addr)}/${MAX_PREFIX[family]}" to trust only that address`,
     );
   }
   return { family, base, mask };
 }
 
-/**
- * The boot error interpolates operator-supplied entries, which could contain
- * control characters (a newline would split the refusal across log lines) or
- * be arbitrarily long. Cap the length first (so no escape sequence is cut
- * in half), then escape control characters and quotes via JSON.stringify so
- * the refusal reads as ONE line naming the offending value.
- */
-function sanitizeEntry(entry: string, maxLength = 60): string {
-  const capped =
-    entry.length > maxLength ? `${entry.slice(0, maxLength)}…` : entry;
-  const escaped = JSON.stringify(capped);
-  return escaped.slice(1, -1);
-}
-
 function invalidEntry(position: number, entry: string, reason: string): Error {
-  return new Error(
-    `entry ${position} ("${sanitizeEntry(entry)}"): ${reason}. Use a comma-separated list of ` +
-      `IPv4/IPv6 literals and CIDR ranges (e.g. "172.20.0.0/16")`,
+  return invalidListEntry(
+    position,
+    entry,
+    reason,
+    'Use a comma-separated list of IPv4/IPv6 literals and CIDR ranges (e.g. "172.20.0.0/16")',
   );
 }
 

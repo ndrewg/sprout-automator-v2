@@ -76,13 +76,30 @@ describe("createOtpAcquirer", () => {
   });
 
   it("stops only the winning attempt's poller, not a future attempt's (abort after resolution is per-call)", async () => {
-    const { deps } = makeFakeDeps();
+    // BACKLOG § 11.1: this used to only check the return value, which a mock
+    // that ignores its signal returns either way — so it passed against the
+    // run-scoped-controller bug. It now asserts on the signals themselves.
+    const { deps, pollForOtp } = makeFakeDeps();
+    const signals: AbortSignal[] = [];
+    let secondAbortedAtCall: boolean | undefined;
+    pollForOtp.mockImplementation(async (_creds, options) => {
+      if (!options?.signal) throw new Error("the acquirer must pass a signal");
+      signals.push(options.signal);
+      if (signals.length === 2) secondAbortedAtCall = options.signal.aborted;
+      return "12345";
+    });
     const { waitForOtpCode } = createOtpAcquirer("run-1", IMAP_CREDS, deps);
 
     await waitForOtpCode();
-    const third = await waitForOtpCode();
+    // The winning attempt's poller is stopped once its code is in hand …
+    expect(signals[0]?.aborted).toBe(true);
 
-    expect(third).toBe("12345");
+    const second = await waitForOtpCode();
+
+    expect(second).toBe("12345");
+    // … and that abort did not reach the next attempt, which started live.
+    expect(secondAbortedAtCall).toBe(false);
+    expect(signals[1]).not.toBe(signals[0]);
   });
 
   it("passes the growing exclusion set so a code already returned is never handed out again", async () => {

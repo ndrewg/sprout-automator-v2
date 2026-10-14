@@ -1,6 +1,13 @@
 name: ci
 on: [push, pull_request]
 jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # AGENTS.md exists twice by convention (root + rebuild/) and must stay
+      # byte-identical; nothing else enforces it (BACKLOG § 10).
+      - run: cmp AGENTS.md rebuild/AGENTS.md
   backend:
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: app/backend } }

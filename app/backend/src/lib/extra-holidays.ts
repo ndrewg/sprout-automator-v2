@@ -1,3 +1,4 @@
+import { invalidListEntry, quoteEntry } from "./config-list-errors";
 import type { HolidayInfo } from "./ph-holidays";
 
 // EXTRA_HOLIDAYS (phase 13A) — operator-provided holidays the bundled dataset
@@ -52,7 +53,7 @@ export function parseExtraHolidays(
       throw invalidEntry(
         i + 1,
         entry,
-        `"${sanitize(dateText)}" is not a real calendar date — expected YYYY-MM-DD (e.g. 2026-11-20, and 2026-02-31 would be rejected)`,
+        `"${quoteEntry(dateText)}" is not a real calendar date — expected YYYY-MM-DD (e.g. 2026-11-20, and 2026-02-31 would be rejected)`,
       );
     }
     // Type "public" (a declared holiday). source "override" is what makes the
@@ -77,18 +78,11 @@ function isRealCalendarDate(dateText: string): boolean {
   return day >= 1 && day <= daysInMonth;
 }
 
-/** Cap length first (so no escape sequence is cut in half), then escape control
- *  characters via JSON.stringify so the refusal reads as ONE line naming the
- *  offending value. Same approach as trusted-peers. */
-function sanitize(entry: string, maxLength = 60): string {
-  const capped =
-    entry.length > maxLength ? `${entry.slice(0, maxLength)}…` : entry;
-  return JSON.stringify(capped).slice(1, -1);
-}
-
 function invalidEntry(position: number, entry: string, reason: string): Error {
-  return new Error(
-    `entry ${position} ("${sanitize(entry)}") ${reason}. Use a comma-separated ` +
-      `list of YYYY-MM-DD=Name entries`,
+  return invalidListEntry(
+    position,
+    entry,
+    reason,
+    "Use a comma-separated list of YYYY-MM-DD=Name entries",
   );
 }

@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import pino from "pino";
 import { config } from "../config";
+import { SECRET_FIELD_NAMES } from "./text";
 
 /**
  * The single application logger.
@@ -36,20 +37,9 @@ function prettyTransport(): object {
 
 export const logger = pino({
   level: config.NODE_ENV === "production" ? "info" : "debug",
-  redact: [
-    "req.headers.cookie",
-    "password",
-    "appPassword",
-    "gmailAppPassword",
-    "code",
-    "otp",
-    "sid",
-    "telegramBotToken",
-    "botToken",
-    "RESEND_API_KEY",
-    "APP_ENCRYPTION_KEY",
-    "SESSION_SECRET",
-  ],
+  // The field names are shared with `redactSecrets` (lib/text.ts), which
+  // applies the same list to free-text error messages.
+  redact: ["req.headers.cookie", ...SECRET_FIELD_NAMES],
   ...prettyTransport(),
 });
 

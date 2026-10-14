@@ -36,6 +36,8 @@ Prune `screenshots/<userId>/<runId>/` older than ~14 days; keep failures longer 
 
 > **Deferred 2026-08-12, deliberately.** Considered for phase 8 and cut. **This is triggered by the disk, not the headcount.** At 5 users it is ~24 MB/day; even at 30 it is ~145 MB/day, and the current host has 565 GB free — years of runway either way. It becomes urgent the day this moves to an 80–160 GB VPS, and not before. Deferring it does **not** cap the user count.
 
+> **Re-checked 2026-10-15, still deferred.** On the laptop: 67 MB across 83 run folders. The trigger (a small VPS disk) hasn't happened, and pruning now would only delete evidence (run screenshots back the run history in an HR dispute like 2026-08-21).
+
 ## 3. IP-keyed auth limiter locks out a whole team behind one NAT
 
 **Bites the morning you onboard people.** Every colleague on the corporate network shares one IP. `authLimiter` is 10 requests / 15 min keyed by IP and, since 4B, covers login, signup, forgot-password and reset as a single shared budget. A few people fumbling passwords the same morning exhaust it for everyone — the rest get "Too many attempts" on their first try of the day with no hint that a colleague caused it.
@@ -119,12 +121,16 @@ Phase 6 landed the transport, the settings row and the routes, so the channel ex
 >
 > **Also found: `AGENTS.md` exists twice** — at the repo root and at `rebuild/AGENTS.md`, byte-identical by convention with nothing enforcing it. A 2026-09-03 edit to the root copy diverged them until the audit caught it. Two files that must agree, with no check that they do, is a drift generator: either make `rebuild/AGENTS.md` a one-line pointer to the root, or add a pre-commit check that they match.
 
+> ✅ **CLOSED 2026-10-15.** The three foundation docs (`02`, `03`, `04`, including the `04` dependency block) now say Vite 8 + TypeScript 6; `phase-3-frontend.md` keeps its historical mention. A new `docs` CI job runs `cmp AGENTS.md rebuild/AGENTS.md`. Not a pre-commit check, because the hooks in `.pre-commit-config.yaml` are not installed on every machine (they are not on the laptop).
+
 ## 11. OTP-fix test debt: a non-discriminating test and an unredacted error path
 
 **Low priority — test-quality debt found in the OTP-retry review (2026-08-11), not a shipping defect.** Don't let either slip into a later refactor:
 
 1. `app/backend/test/services/otp-acquisition.test.ts:73` ("stops only the winning attempt's poller") **does not discriminate** — it passes against the reintroduced run-scoped-controller bug because the mock `pollForOtp` ignores the signal. Only the first test (`:42-71`) protects the fresh-controller property; a future edit deleting that first test would silently lose the coverage. Make the second test assert on the captured signal (snapshotted at call time), or delete it so a removal is loud.
 2. `errorSummary` (`lib/text.ts`) is a **pure passthrough**: if any error cause ever carried a secret, it would land verbatim in `runs.error` and the Telegram failure message (`renderRunFinishedMessage` embeds it). No *current* source can produce such a cause (no `src` error interpolates a credential; imapflow 1.4.2 redacts creds), and the new rule-4 integration assertion (`otp-error-unwrap.test.ts:143-146`) is vacuous by construction — benign fixed-string causes. **Fix:** route `errorSummary` output through a string-redaction step mirroring the key list `lib/logger.ts` already maintains (`password`, `appPassword`, `gmailAppPassword`, `code`, `otp`, `botToken`, …) before the message is persisted or notified, plus a unit test injecting a secret-bearing cause — that test fails today, so the redaction ships with it.
+
+> ✅ **CLOSED 2026-10-15.** (1) The second test now captures each attempt's `AbortSignal` and asserts the winning attempt's signal is aborted after it resolves while the next attempt's was live at call time, so it fails against the run-scoped-controller bug. (2) `errorSummary` now passes its result through a new `redactSecrets` (`lib/text.ts`): named fields (`password=…`, `"appPassword":"…"`, quoted values taken whole), digits-only for `code`/`otp` so "error code: ECONNREFUSED" survives, Telegram bot tokens anywhere, and `scheme://user:secret@` URL credentials. The field-name list is now one exported `SECRET_FIELD_NAMES`, used by both the logger's `redact` and `redactSecrets`. Unit tests inject secret-bearing causes; one of them caught a real gap during the work (a token inside `/bot123…:` has no word boundary before it).
 
 ## 12. Deployment path: domain → Resend → Cloudflare Tunnel
 
@@ -153,6 +159,8 @@ The host is a ThinkPad E14 Gen 5: 40 GB RAM, 12 threads, 565 GB free — **more 
 ## 14. Tighten the e2e seed helper's database guard
 
 **Found 2026-08-14 (phase 9 round-2 tester F2) — LOW, non-blocking, test-only helper.** `app/backend/test/e2e-seed-runs.ts` guards with `current_database()` `.includes("test")`, which matches *any* database name containing that substring (`latest`, `contest`, `sprout_prototype` all pass — proven by seeding 3 rows into a throwaway DB named `latest`). The realistic risk (a bare invocation against the real `sprout` DB) is already blocked. Tighten to an exact `sprout_test` match or a `_test`-suffix rule the next time the helper is touched. See `STATE.md` § Known gaps.
+
+> ✅ **CLOSED 2026-10-15.** `test/e2e-seed-runs.ts` now requires `current_database()` to end in `_test`.
 
 ---
 
@@ -225,6 +233,8 @@ No `renovate.json`, no `.github/dependabot.yml`. Phase 11 exists precisely becau
 
 Renovate or Dependabot, grouped and on a slow cadence (weekly or monthly) so it is a small habit rather than a flood. Note the interaction with `minimumReleaseAge: 1440` in both `pnpm-workspace.yaml` files — a bot that proposes same-day releases will fight that setting, so configure it to respect the same delay. Do this **after** phase 11, so the bot starts from a clean baseline rather than opening seventeen PRs on day one.
 
+> ✅ **CLOSED 2026-10-15.** `.github/dependabot.yml`: monthly, grouped minor+patch PRs for `app/backend`, `app/frontend` and GitHub Actions, with `cooldown: default-days: 3` (at least the 1-day `minimumReleaseAge`). `playwright` is ignored in the backend because it must move with the Docker base image tag. Security updates are a separate repo setting (Settings → Code security → Dependabot security updates) that the operator should switch on.
+
 ## 21. Nothing records that anyone consented
 
 **Your exposure, not the app's.** The tool logs in as other people using their credentials and clocks them under their identity, against payroll. § 5's one-pager *says* accuracy remains their responsibility; nothing records that anyone read it or agreed.
@@ -236,6 +246,8 @@ Minimum version: a short acknowledgement at signup — what is stored, that it i
 **Found 2026-09-03 (`improve-codebase-architecture` review) — low priority, cosmetic duplication, not a defect.** `lib/extra-holidays.ts`'s `invalidEntry` helper and `lib/trusted-peers.ts`'s equivalent both independently reimplement the same shallow formatting logic for a boot-refusal message: cap the entry length, escape it, name the 1-based position. Written twice because each was added in its own phase (11 and 8) with no shared home for "how a boot-refusal names its bad entry."
 
 **Not a call to unify the validators themselves** — `trusted-peers.ts` does real CIDR bigint arithmetic across IPv4/IPv6 and `extra-holidays.ts` does simple date parsing; forcing a shared parser would make both shallower, not deeper. `lib/signup-allowlist.ts` doesn't even validate-or-refuse, so it has nothing to share. The narrow fix: extract just the formatter — something like `describeInvalidEntry(position, rawEntry, reason)` — into a small shared `lib/config-list-errors.ts`, so the next override list (there will likely be one) reuses a tested formatter instead of writing a third copy. Low urgency; roll it into whatever next touches either file.
+
+> ✅ **CLOSED 2026-10-15.** New `lib/config-list-errors.ts` (`quoteEntry` + `invalidListEntry`, unit-tested); `extra-holidays.ts` and `trusted-peers.ts` use it and keep their own parsers. One visible change: an `EXTRA_HOLIDAYS` refusal now reads `entry N ("…"): reason.` with a colon, matching `TRUSTED_CLOUDFLARE_PEERS`.
 
 > **Note (same review, no action taken):** the review also checked whether `services/notifications.ts` (547 lines, touched by nearly every phase since 6) was becoming a God-module. It isn't — pure rendering, dispatch, holiday-skip notices, and the injected `SweepDeps` seam are cleanly separated and each independently tested (714-line test file). Deleting it would concentrate real complexity elsewhere, so it passes the deletion test as a properly deep module; the growth (a new `DispatchKind` per phase) is organic breadth in one coherent responsibility, not a wrong boundary. Flagged here only so a future review doesn't have to re-derive this — re-check if it crosses ~800 lines or a phase struggles to add a toggle cleanly.
 

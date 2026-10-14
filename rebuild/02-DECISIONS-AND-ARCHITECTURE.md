@@ -16,7 +16,7 @@ A review before the fresh build updated several version/tech choices. The *archi
 - **Node 22** for the frontend build stage (was 20).
 - **pnpm 11** as the package manager (was npm), for supply-chain hardening — script-blocking (`allowBuilds`) + release cooldown (`minimumReleaseAge`). See **D14** and `reference/supply-chain-and-ci.md`.
 - **gitleaks pre-commit + minimal CI** (typecheck/test/audit) from commit 1 — adopted, not deferred (see improvements list at the end; the tsx-no-compile choice makes the typecheck gate essential).
-- **Frontend is the LATEST stack: React 19 + Tailwind 4 + shadcn-latest + Vite 6 + TanStack Query v5.** The local model's late-2024 cutoff is bridged by a **live-docs MCP (Context7)** — the model fetches current API docs at build time instead of relying on stale training. See **D15** and **D16** + `reference/live-docs-and-mcp.md`.
+- **Frontend is the LATEST stack: React 19 + Tailwind 4 + shadcn-latest + Vite 8 + TypeScript 6 + TanStack Query v5.** The local model's late-2024 cutoff is bridged by a **live-docs MCP (Context7)** — the model fetches current API docs at build time instead of relying on stale training. See **D15** and **D16** + `reference/live-docs-and-mcp.md`.
 - **Deploy target is now Hetzner CPX21 (4 GB)** not CPX11 (2 GB) — headroom for 3 concurrent Chromiums. See **D12**, which the 2026-10-14 review revised: **no VPS was ever deployed**, the as-built host is a Windows work laptop, and the VPS plan below is now the target *if the deployment ever moves*.
 
 Everything else below stands. Where a decision names an old version, the value above wins.
@@ -165,7 +165,7 @@ Two *independent* mechanisms solving two *different* problems — do not merge t
 - "Latest version" is explicitly **not** treated as "safe" — a fresh release is the dangerous case; the cooldown is the mitigation.
 
 ### D15 — Frontend is the latest stack (React 19 / Tailwind 4 / shadcn-latest)
-- The frontend targets **React 19, Tailwind CSS v4, shadcn-latest, Vite 6, TanStack Query v5** — current, not pinned-to-old.
+- The frontend targets **React 19, Tailwind CSS v4, shadcn-latest, Vite 8 + TypeScript 6, TanStack Query v5** — current, not pinned-to-old.
 - Earlier this was pinned to React 18 / Tailwind 3 to match the local model's late-2024 cutoff. That was reversed in favor of **D16 (live docs)**: rather than ship aging libraries, we run the current stack and supply the model's missing knowledge just-in-time via Context7. Net: latest stack *and* the existing local model.
 - **Lean on the CLIs:** the Vite template + `shadcn@latest` CLI emit React-19 / Tailwind-v4-correct code (CSS-first `@theme`, `data-slot`, correct Radix versions), so the model generates less framework code from memory. Tailwind v4 has **no `tailwind.config.js`/postcss**; the frontend Docker build stage is **Debian** (`node:22-bookworm-slim`), not Alpine, for v4's native engine.
 

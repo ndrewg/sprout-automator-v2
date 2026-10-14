@@ -1,0 +1,51 @@
+# Keeps dependencies current so `pnpm audit` doesn't drift red with no commit
+# behind it (BACKLOG § 15 twice, § 20). Slow and grouped on purpose: one PR per
+# directory per month, not a flood.
+#
+# `cooldown` makes Dependabot wait before proposing a release, which matches the
+# `minimumReleaseAge: 1440` (1 day) in both pnpm-workspace.yaml files. Without it
+# the bot proposes same-day releases that `pnpm install` then refuses to fetch.
+# Security updates are separate (repo Settings → Code security) and ignore the
+# monthly schedule.
+version: 2
+updates:
+  - package-ecosystem: npm # covers pnpm lockfiles
+    directory: /app/backend
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 3
+    ignore:
+      # Pinned to the Docker base image (mcr.microsoft.com/playwright:v1.60.0-noble
+      # in app/backend/Dockerfile): bump both together, by hand, or the
+      # installed browsers stop matching the library.
+      - dependency-name: playwright
+    groups:
+      backend-minor-and-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "chore(deps-backend)"
+
+  - package-ecosystem: npm
+    directory: /app/frontend
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 3
+    groups:
+      frontend-minor-and-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "chore(deps-frontend)"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(ci)"

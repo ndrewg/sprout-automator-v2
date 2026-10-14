@@ -2,11 +2,11 @@
 
 Exact dependency versions and the full contents of every config file. The LLM should reproduce these **verbatim** — versions are pinned where a bump could change behavior (Playwright especially).
 
-> **Stack decisions locked for this build (June 2026) — LATEST across the board:** Express **5**, PostgreSQL **18**, Playwright **1.60.0**, Node **22**, **pnpm 11** (supply-chain hardening — `reference/supply-chain-and-ci.md`), and the **latest frontend**: **React 19 + Tailwind CSS v4 + shadcn-latest + Vite 6 + TanStack Query v5**. Deploy target is a **4 GB** Hetzner CPX21.
+> **Stack decisions locked for this build (June 2026) — LATEST across the board:** Express **5**, PostgreSQL **18**, Playwright **1.60.0**, Node **22**, **pnpm 11** (supply-chain hardening — `reference/supply-chain-and-ci.md`), and the **latest frontend**: **React 19 + Tailwind CSS v4 + shadcn-latest + Vite 8 + TypeScript 6 + TanStack Query v5**. Deploy target is a **4 GB** Hetzner CPX21.
 >
 > ⚠️ **Most of this stack post-dates common training cutoffs.** **Fetch current docs at build time via Context7 (MCP)** rather than emitting remembered (stale) APIs. See `reference/live-docs-and-mcp.md`; it's attached to every phase.
 >
-> ⚠️ **As-built drift (frontend versions).** This document targets Vite 6 / TypeScript 5.6, but the Vite `react-ts` template used in Phase 3 pinned **Vite 8 + TypeScript 6**, and that is what is installed. Consequences already handled in the code: **TS 6 deprecates `baseUrl`**, so the shadcn `@/*` alias is configured with `paths` alone (no `baseUrl`) in `tsconfig.json` + `tsconfig.app.json`. Treat the frontend version numbers below as a **floor, established by the CLI**, not as pins — the backend pins (especially `playwright@1.60.0`) are real pins and still binding. See `phases/phase-3-frontend.md` § 3A.
+> ⚠️ **As-built drift (frontend versions).** This document originally targeted Vite 6 / TypeScript 5.6 (corrected to Vite 8 / TS 6 throughout on 2026-10-15, BACKLOG § 10), but the Vite `react-ts` template used in Phase 3 pinned **Vite 8 + TypeScript 6**, and that is what is installed. Consequences already handled in the code: **TS 6 deprecates `baseUrl`**, so the shadcn `@/*` alias is configured with `paths` alone (no `baseUrl`) in `tsconfig.json` + `tsconfig.app.json`. Treat the frontend version numbers below as a **floor, established by the CLI**, not as pins — the backend pins (especially `playwright@1.60.0`) are real pins and still binding. See `phases/phase-3-frontend.md` § 3A.
 
 ---
 
@@ -351,7 +351,7 @@ export const config: AppConfig = loadConfig();
 
 ## Frontend `package.json` (target libraries — let the CLI pin exact versions)
 
-> The frontend is the **latest** stack: **React 19, Tailwind CSS v4, shadcn-latest, Vite 6, TanStack Query v5**. These are all **post-cutoff** for a late-2024 local model, so **do not trust version numbers or setup from memory** — scaffold with the tools (Vite template + `pnpm dlx shadcn@latest init`) and **fetch current docs via Context7** (`reference/live-docs-and-mcp.md`) before writing. The set below is the target shape; the Vite template and shadcn CLI establish exact current versions.
+> The frontend is the **latest** stack: **React 19, Tailwind CSS v4, shadcn-latest, Vite 8 + TypeScript 6, TanStack Query v5**. These are all **post-cutoff** for a late-2024 local model, so **do not trust version numbers or setup from memory** — scaffold with the tools (Vite template + `pnpm dlx shadcn@latest init`) and **fetch current docs via Context7** (`reference/live-docs-and-mcp.md`) before writing. The set below is the target shape; the Vite template and shadcn CLI establish exact current versions.
 
 ```json
 {
@@ -383,8 +383,8 @@ export const config: AppConfig = loadConfig();
     "@vitejs/plugin-react": "^4",
     "tailwindcss": "^4",
     "tw-animate-css": "latest",
-    "typescript": "^5.6",
-    "vite": "^6"
+    "typescript": "~6.0.2",
+    "vite": "^8.1.0"
   }
 }
 ```

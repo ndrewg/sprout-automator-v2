@@ -28,9 +28,11 @@ async function main(): Promise<void> {
     "select current_database() as dbname",
   );
   const dbname = rows[0]?.dbname ?? "";
-  if (!dbname.includes("test")) {
+  // Exact suffix, not a substring: "latest", "contest" and "sprout_prototype"
+  // all contain "test" and would have passed the old check (BACKLOG § 14).
+  if (!dbname.endsWith("_test")) {
     throw new Error(
-      `refusing to seed: connected database "${dbname}" is not a test database (name must contain "test")`,
+      `refusing to seed: connected database "${dbname}" is not a test database (name must end in "_test")`,
     );
   }
 
