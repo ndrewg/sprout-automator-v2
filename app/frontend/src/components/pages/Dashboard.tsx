@@ -8,6 +8,7 @@ import { CredentialsPanel } from "@/components/panels/CredentialsPanel";
 import { ManualRunPanel } from "@/components/panels/ManualRunPanel";
 import { RunsPanel } from "@/components/panels/RunsPanel";
 import { NotificationsPanel } from "@/components/panels/NotificationsPanel";
+import { PanelBoundary } from "@/components/ErrorBoundary";
 
 export function Dashboard({ user }: { user: User }) {
   const logout = useLogout();
@@ -63,11 +64,21 @@ export function Dashboard({ user }: { user: User }) {
             </AlertDescription>
           </Alert>
         ) : null}
-        <SchedulePanel />
-        <NotificationsPanel />
-        <CredentialsPanel />
-        <ManualRunPanel />
-        <RunsPanel />
+        <PanelBoundary title="Schedule">
+          <SchedulePanel />
+        </PanelBoundary>
+        <PanelBoundary title="Notifications">
+          <NotificationsPanel />
+        </PanelBoundary>
+        <PanelBoundary title="Credentials">
+          <CredentialsPanel />
+        </PanelBoundary>
+        <PanelBoundary title="Manual run">
+          <ManualRunPanel />
+        </PanelBoundary>
+        <PanelBoundary title="Run history">
+          <RunsPanel />
+        </PanelBoundary>
       </main>
     </div>
   );

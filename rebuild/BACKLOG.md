@@ -87,6 +87,8 @@ State plainly in both: **a missed-run alert means "the automation didn't run", n
 
 `RevealInput` is currently **duplicated verbatim** in both panels. The fix is to extract it to `components/ui/` (or `components/RevealInput.tsx`) and use the one implementation in all four places — not to write a third copy. Keep the existing behaviour: `InputGroup` + `InputGroupAddon` with an eye icon, `aria-label` toggling between "Show" and "Hide", `type` swapping between `password` and `text`.
 
+> ✅ **CLOSED 2026-10-15.** Extracted the one shared `app/frontend/src/components/RevealInput.tsx` (same `InputGroup` + `InputGroupAddon` eye toggle, `aria-label` "Show"/"Hide", `type` password↔text; other `<input>` props pass through, `autoComplete` defaults to `off`). Both panel copies are deleted; `AuthPage` (login/signup password: id, autocomplete, `minLength`, `required` unchanged) and `ResetPasswordPage` (`#new-password`) now use it. The toggle label deliberately never contains "password", so the e2e `getByLabel("Password", { exact: true })` / `getByLabel("New password")` locators still resolve to the input alone. Unit-tested in `RevealInput.test.tsx` (initial render + attribute pass-through); the click toggle itself is `[manual]` / e2e territory because the unit suite has no DOM.
+
 ## 7. Retry on transient failure
 
 **A flaky portal at 05:30 currently costs the whole day.** The standing position — "the next scheduled run is the de-facto retry" (`01-PROJECT-BRIEF.md`) — is only true if *tomorrow* counts as a retry interval. For a clock-in it doesn't.
@@ -150,6 +152,8 @@ The host is a ThinkPad E14 Gen 5: 40 GB RAM, 12 threads, 565 GB free — **more 
 
 **Found 2026-08-14 (phase 9 round-1 tester F4) — pre-existing, NOT a phase-9 regression.** In `RunsPanel.tsx` the entire `<tr>` is the expand target (with `onClick` and no `tabIndex`/`role`); verified that before this phase the committed version had the identical `<tr onClick>`, and phase 9 only changed `py-2` → `py-3`. Tab from "Show more" jumps straight to `BODY` — 10 clickable rows, 0 focusable. The phase's spec pointed `ui-ux-pro-max` § 1 at this exact control and the ≥44 px touch target was met (measured 65 px), but keyboard nav was left broken. Fix: `tabIndex={0}` + `role="button"` + Enter/Space handler (or a real button in the first cell). Independent of the phase-9 working tree; record it so it is not lost.
 
+> ✅ **CLOSED 2026-10-15.** Took the "real button in the first cell" option, which keeps table semantics: the chevron is now a shadcn `Button` (ghost, `icon-sm`) with `aria-expanded`, `aria-controls` (the detail row id while open) and a per-run `aria-label` ("Details for <action> run, <date> <time>"). The native button gives Tab focus, Enter/Space and the shadcn `focus-visible` ring. The row keeps its mouse/touch `onClick`; the button stops propagation so one click toggles once. Keyboard walk-through is `[manual]`.
+
 ## 14. Tighten the e2e seed helper's database guard
 
 **Found 2026-08-14 (phase 9 round-2 tester F2) — LOW, non-blocking, test-only helper.** `app/backend/test/e2e-seed-runs.ts` guards with `current_database()` `.includes("test")`, which matches *any* database name containing that substring (`latest`, `contest`, `sprout_prototype` all pass — proven by seeding 3 rows into a throwaway DB named `latest`). The realistic risk (a bare invocation against the real `sprout` DB) is already blocked. Tighten to an exact `sprout_test` match or a `_test`-suffix rule the next time the helper is touched. See `STATE.md` § Known gaps.
@@ -189,6 +193,8 @@ The host is a ThinkPad E14 Gen 5: 40 GB RAM, 12 threads, 565 GB free — **more 
 
 `whitespace-nowrap` on the date and both time cells in `RunsPanel.tsx`. Roll it into whatever next touches that table — it is not worth a round of its own.
 
+> ✅ **CLOSED 2026-10-15.** `whitespace-nowrap` added to the Date, Started and Finished cells in `RunsPanel.tsx`. The 375 px look is `[manual]`.
+
 ---
 
 ## 17. No way to remove a departed colleague's credentials
@@ -216,6 +222,8 @@ Phase 7's pause window is the workaround, but it requires the user to know in ad
 **A React render error is a white screen.** Nothing in `app/frontend/src/` implements `ErrorBoundary` or `componentDidCatch`. For the operator that means a console dive; for a colleague it means "the app is broken" with nothing useful to report and no way to recover except a reload they may not think to try.
 
 One boundary around the dashboard, showing what failed and a reload affordance, plus a boundary around each panel so one bad panel does not blank the page. Small, and it changes the worst-case user experience from a blank screen to a sentence.
+
+> ✅ **CLOSED 2026-10-15.** New `app/frontend/src/components/ErrorBoundary.tsx`: a small class component (React 19 still has no hook for render errors; no new dependency). `App.tsx` wraps everything in `AppBoundary` ("Something went wrong" + **Reload page**); `Dashboard.tsx` wraps each of the five panels in `PanelBoundary` ("<Panel> couldn't be displayed." + **Try again**, which resets only that boundary). Fallbacks never render the error message or stack; details go to `console.error`. Unit-tested in `ErrorBoundary.test.tsx` (throwing child gives the fallback without the error text, a falsy throw still falls back, reset re-renders the children) by driving the boundary lifecycle directly, since the unit suite has no DOM and React skips boundaries during SSR. Seeing a real panel crash in the browser is `[manual]`.
 
 ## 20. Nothing keeps dependencies current, so phase 10 will recur
 
