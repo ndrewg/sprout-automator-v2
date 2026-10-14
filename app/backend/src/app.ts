@@ -25,11 +25,12 @@ import {
   enabledScheduleCount,
   schedulerLastFireAt,
 } from "./services/scheduler";
+import { wallClockLastTickAt } from "./lib/wall-clock-tick";
 
 // Everything that builds the Express app: middleware order, routers, /health,
 // the static SPA, the SPA catch-all, and the global error handler. Split out of
 // index.ts so route tests can import it WITHOUT booting a listener, recovering
-// orphaned runs, or loading cron schedules (all of which live in index.ts's
+// orphaned runs, or loading schedules (all of which live in index.ts's
 // start()). This is a move, not a redesign — the middleware order is verbatim.
 
 export const app = express();
@@ -110,7 +111,7 @@ app.use("/notifications", notificationsRouter);
 // The checks (12A):
 //   - db: can we run a trivial query? A down DB is the historical "healthy"
 //     lie — a backend whose only honest field said "down" still answered 200.
-//   - scheduler: does the number of cron schedules REGISTERED in this process
+//   - scheduler: does the number of schedules REGISTERED in this process
 //     match the number of ENABLED schedules in the database? A backend that
 //     booted but registered zero schedules (and so will never run again) is
 //     broken, and today nothing reports it.
@@ -128,7 +129,7 @@ app.get("/health", async (_req: Request, res: Response) => {
 
   const registered = activeScheduleCount();
   // enabledInDb > 0 but nothing registered means the process never rehydrated
-  // its cron schedules — it is alive but will never run. That is degraded.
+  // its schedules — it is alive but will never run. That is degraded.
   const scheduleMismatch = enabledInDb > 0 && registered === 0;
   const registeredMatchesEnabled = enabledInDb === 0 || registered === enabledInDb;
   const { active, waiting, cap } = runQueue.stats();
@@ -144,6 +145,9 @@ app.get("/health", async (_req: Request, res: Response) => {
       enabledInDb,
       registeredMatchesEnabled,
       lastFireAt: schedulerLastFireAt(),
+      // The shared wall-clock tick that fires every scheduled job. NULL or
+      // stale (older than a few ticks) means nothing time-based will run.
+      lastTickAt: wallClockLastTickAt(),
     },
     queue: { active, waiting, cap },
     timestamp: new Date().toISOString(),

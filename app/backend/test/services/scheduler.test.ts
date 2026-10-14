@@ -1,60 +1,79 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
-import cron from "node-cron";
-import {
-  dailyTaskOptions,
-  timeToCronExpression,
-} from "../../src/services/scheduler";
+import { describe, it, expect } from "vitest";
+import type { Schedule } from "../../src/db/schema";
+import { dueSlots } from "../../src/services/scheduler";
 
-describe("timeToCronExpression", () => {
-  it("converts HH:MM / HH:MM:SS to a Mon–Fri cron expression", () => {
-    expect(timeToCronExpression("05:30")).toBe("30 5 * * 1-5");
-    expect(timeToCronExpression("18:05:00")).toBe("5 18 * * 1-5");
-    expect(timeToCronExpression("00:00")).toBe("0 0 * * 1-5");
-    expect(timeToCronExpression("23:59")).toBe("59 23 * * 1-5");
+// dueSlots is the scheduler's whole decision: which Mon–Fri Manila slots are
+// due at a given wall-clock instant. It replaced node-cron (2026-10-13), whose
+// long timers woke late on the drifting host clock and dropped the slot.
+
+const WINDOW_MS = 20 * 60 * 1000;
+
+function row(overrides: Partial<Schedule> = {}): Schedule {
+  return {
+    id: "s1",
+    userId: "u1",
+    clockInTime: "05:30:00",
+    clockOutTime: "16:15:00",
+    enabled: true,
+    updatedAt: new Date(),
+    pausedFrom: null,
+    pausedUntil: null,
+    ...overrides,
+  } as Schedule;
+}
+
+// Tue 2026-10-13, Manila wall time.
+const at = (hhmmss: string) => new Date(`2026-10-13T${hhmmss}+08:00`);
+const none = new Set<string>();
+
+describe("dueSlots", () => {
+  it("is not due a second before the slot, and due at the slot", () => {
+    expect(dueSlots([row()], at("05:29:59"), none, WINDOW_MS)).toEqual([]);
+    expect(dueSlots([row()], at("05:30:00"), none, WINDOW_MS)).toEqual([
+      {
+        userId: "u1",
+        action: "in",
+        manilaDate: "2026-10-13",
+        slot: at("05:30:00"),
+      },
+    ]);
   });
 
-  it("rejects out-of-range / malformed times", () => {
-    expect(() => timeToCronExpression("24:00")).toThrow();
-    expect(() => timeToCronExpression("5:99")).toThrow();
-    expect(() => timeToCronExpression("notatime")).toThrow();
-  });
-});
-
-// Regression for the misses from 2026-09-14 to 2026-10-07. The wall clock in the
-// Docker Desktop VM gains ~57 s/day on the monotonic clock setTimeout uses, so
-// a daily node-cron task wakes about a minute late by wall time. Reproduced here
-// by jumping the fake system clock ahead WITHOUT advancing the timers.
-describe("daily task tolerance to wall-clock drift", () => {
-  afterEach(() => {
-    vi.useRealTimers();
+  it("still fires a slot reached late, up to the fire window (the 2026-10-13 miss)", () => {
+    // The node-cron version woke 26 min 48 s late this morning and dropped
+    // the slot; with a 20-minute window that lateness is outside, but anything
+    // a 15 s tick can produce is well inside.
+    expect(dueSlots([row()], at("05:49:59"), none, WINDOW_MS)).toHaveLength(1);
+    expect(dueSlots([row()], at("05:50:00"), none, WINDOW_MS)).toEqual([]);
   });
 
-  async function fireCountWhenWokenLate(
-    options: Parameters<typeof cron.schedule>[2],
-    lateByMs: number,
-  ): Promise<number> {
-    vi.useFakeTimers();
-    // Mon 2026-10-05 05:29:00 Manila = Sun 21:29:00Z.
-    vi.setSystemTime(new Date("2026-10-04T21:29:00.000Z"));
-    let fired = 0;
-    const task = cron.schedule("30 5 * * 1-5", () => void fired++, options);
-    try {
-      // The wall clock drifts ahead; the timer still waits its full 60 s.
-      vi.setSystemTime(Date.now() + lateByMs);
-      await vi.advanceTimersByTimeAsync(60_000);
-    } finally {
-      void task.stop();
-    }
-    return fired;
-  }
+  it("handles the clock-out slot independently", () => {
+    const due = dueSlots([row()], at("16:15:10"), none, WINDOW_MS);
+    expect(due.map((d) => d.action)).toEqual(["out"]);
+  });
 
-  it("drops the slot with node-cron's default 1000 ms tolerance (the bug)", async () => {
+  it("never fires a slot already fired today", () => {
+    const fired = new Set(["u1::in::2026-10-13"]);
+    expect(dueSlots([row()], at("05:30:15"), fired, WINDOW_MS)).toEqual([]);
+  });
+
+  it("skips weekends (Mon–Fri only) and disabled schedules", () => {
+    const saturday = new Date("2026-10-10T05:30:00+08:00");
+    expect(dueSlots([row()], saturday, none, WINDOW_MS)).toEqual([]);
     expect(
-      await fireCountWhenWokenLate({ timezone: "Asia/Manila" }, 60_000),
-    ).toBe(0);
+      dueSlots([row({ enabled: false })], at("05:30:00"), none, WINDOW_MS),
+    ).toEqual([]);
   });
 
-  it("still fires a slot woken a minute late with dailyTaskOptions()", async () => {
-    expect(await fireCountWhenWokenLate(dailyTaskOptions(), 60_000)).toBe(1);
+  it("uses Manila time, not the process timezone", () => {
+    // 21:30Z Monday is 05:30 Tuesday in Manila.
+    const due = dueSlots(
+      [row()],
+      new Date("2026-10-12T21:30:00Z"),
+      none,
+      WINDOW_MS,
+    );
+    expect(due).toHaveLength(1);
+    expect(due[0]!.manilaDate).toBe("2026-10-13");
   });
 });

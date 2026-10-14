@@ -18,6 +18,7 @@ import {
   users,
 } from "../../src/db/schema";
 import { encrypt } from "../../src/lib/encryption";
+import { manilaDateString } from "../../src/lib/ph-holidays";
 import { executeQueuedRun, startRun } from "../../src/services/runs";
 import { runAutomation } from "../../src/automation/runAutomation";
 import {
@@ -71,12 +72,10 @@ vi.mock("../../src/services/notifications", async (importOriginal) => {
 });
 import * as notificationsModule from "../../src/services/notifications";
 
-const todayStr = (): string => {
-  const now = new Date();
-  const m = `${now.getMonth() + 1}`.padStart(2, "0");
-  const d = `${now.getDate()}`.padStart(2, "0");
-  return `${now.getFullYear()}-${m}-${d}`;
-};
+// The MANILA date, like the code under test. A process-local date disagreed
+// with it from 00:00 to 08:00 Manila whenever the process ran in UTC, which
+// failed 7 tests in that window.
+const todayStr = (): string => manilaDateString(new Date());
 
 /** The instant whose Manila wall clock is TODAY at hour:minute (Manila = UTC+8,
  *  so the UTC instant is wall - 8h; Date.UTC normalizes negative hours). */

@@ -1,8 +1,9 @@
-import cron from "node-cron";
 import { eq } from "drizzle-orm";
 import { db } from "../db/client";
 import { gazetteHolidays } from "../db/schema";
 import { logger } from "../lib/logger";
+import { manilaDateString } from "../lib/ph-holidays";
+import { manilaHhmm, onTick } from "../lib/wall-clock-tick";
 import {
   fetchGazetteProclamations,
   type GazetteEntry,
@@ -74,6 +75,8 @@ export async function loadGazetteForDate(
   }));
 }
 
+const NIGHTLY_AT = "03:00"; // Manila wall time, before the 05:30 decision.
+
 /**
  * Register the NIGHTLY Gazette refresh (03:00 Manila, before the 05:30
  * decision) and do an initial refresh at boot so a fresh container already has
@@ -81,11 +84,20 @@ export async function loadGazetteForDate(
  * first fetch must not delay boot.
  */
 export function startGazetteRefresh(): void {
-  cron.schedule("0 3 * * *", () => void refreshGazetteCache(), {
-    timezone: "Asia/Manila",
+  // The boot refresh counts as today's nightly one if boot is already past
+  // 03:00; a boot before 03:00 still gets the 03:00 refresh.
+  let lastNightlyDate: string | null =
+    manilaHhmm(new Date()) >= NIGHTLY_AT ? manilaDateString(new Date()) : null;
+  // Driven by the shared wall-clock tick, not a long timer (see D8): the first
+  // tick at or after 03:00 Manila each day refreshes, however late it is.
+  onTick("gazette", (now) => {
+    const today = manilaDateString(now);
+    if (lastNightlyDate === today || manilaHhmm(now) < NIGHTLY_AT) return;
+    lastNightlyDate = today;
+    void refreshGazetteCache();
   });
   logger.info(
-    { expression: "0 3 * * *", timezone: "Asia/Manila" },
+    { at: NIGHTLY_AT, timezone: "Asia/Manila" },
     "gazette refresh registered",
   );
   void refreshGazetteCache();

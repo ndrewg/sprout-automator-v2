@@ -1,5 +1,5 @@
-import cron, { type ScheduledTask } from "node-cron";
 import type { ClockAction } from "../automation/clock";
+import { manilaHhmm, onTick } from "../lib/wall-clock-tick";
 
 // The in-memory one-shot retry registry (phase 14). Holds at most one pending
 // retry per (user, action, Manila date) and lets callers schedule, cancel, or
@@ -12,35 +12,39 @@ import type { ClockAction } from "../automation/clock";
 // a documented limitation (see the phase report) — a process that was itself
 // down cannot retry (that is phase 12's dead-man's-switch), and a retry that
 // survives a restart is not worth the persisted state.
+//
+// Firing is driven by the shared wall-clock tick (lib/wall-clock-tick.ts), NOT
+// a timer per retry: a pending retry fires on the first tick at or after its
+// `fireAt`, however late that tick is. It used to be a one-shot node-cron task,
+// which a drifting monotonic clock could make skip (see D8). An entry stays in
+// the map after firing (so hasPendingRetry stays true while the attempt runs)
+// until attemptRun cancels it; `fired` stops a second fire in the meantime.
 
-type PendingEntry = { task: ScheduledTask; attempt: number; fireAt: Date };
+type PendingEntry = {
+  attempt: number;
+  fireAt: Date;
+  onFire: () => void;
+  fired: boolean;
+};
 
-// userId -> action -> manilaDate -> the pending retry.
+// "userId::action::manilaDate" -> the pending retry.
 const pending = new Map<string, PendingEntry>();
 
 const key = (userId: string, action: ClockAction, manilaDate: string): string =>
   `${userId}::${action}::${manilaDate}`;
 
-const wallTimeFmt = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "Asia/Manila",
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: false,
-});
-
 /** "HH:mm" in Asia/Manila for an instant. */
 export function manilaWallTime(dt: Date): string {
-  return wallTimeFmt.format(dt);
+  return manilaHhmm(dt);
 }
 
-/** "HH:mm" (Manila) -> a node-cron 5-field expression that fires daily at that
- *  wall time in the Asia/Manila timezone. Used for one-shot retries: since a
- *  retry always targets the CURRENT Manila day, "m h * * *" fires today at the
- *  right wall time, and the attempt's own day-rollover re-check cancels it if
- *  the wall clock ever passes to another day. */
-export function wallTimeCronExpr(hhmm: string): string {
-  const [h, m] = hhmm.split(":").map(Number);
-  return `${m} ${h} * * *`;
+/** Fire every pending retry whose time has come. Exported for tests. */
+export function fireDueRetries(now: Date): void {
+  for (const entry of pending.values()) {
+    if (entry.fired || now.getTime() < entry.fireAt.getTime()) continue;
+    entry.fired = true;
+    entry.onFire();
+  }
 }
 
 export type OneShotRetryParams = {
@@ -56,14 +60,13 @@ export type OneShotRetryParams = {
  *  (user, action, date) is replaced (the newer attempt supersedes it). */
 export function scheduleOneShotRetry(params: OneShotRetryParams): void {
   const { userId, action, manilaDate, attempt, fireAt, onFire } = params;
-  cancelPendingRetry(userId, action, manilaDate);
-  const expr = wallTimeCronExpr(manilaWallTime(fireAt));
-  const task = cron.schedule(
-    expr,
+  pending.set(key(userId, action, manilaDate), {
+    attempt,
+    fireAt,
     onFire,
-    { timezone: "Asia/Manila", maxExecutions: 1 },
-  );
-  pending.set(key(userId, action, manilaDate), { task, attempt, fireAt });
+    fired: false,
+  });
+  onTick("retries", fireDueRetries);
 }
 
 /** Cancel any pending retry for (user, action, date). Safe to call when none
@@ -73,14 +76,7 @@ export function cancelPendingRetry(
   action: ClockAction,
   manilaDate: string,
 ): void {
-  const k = key(userId, action, manilaDate);
-  const entry = pending.get(k);
-  if (!entry) return;
-  // node-cron v4 types destroy() as void | Promise<void>; the union makes
-  // no-floating-promises flag it, so mark the deliberate non-await explicitly
-  // (same pattern as scheduler.ts's stop()).
-  void entry.task.destroy();
-  pending.delete(k);
+  pending.delete(key(userId, action, manilaDate));
 }
 
 /** True when a retry is currently pending for (user, action, date). */
@@ -103,8 +99,5 @@ export function pendingAttempt(
 
 /** Test hook: clear the whole registry (used between integration tests). */
 export function clearPendingRetries(): void {
-  for (const entry of pending.values()) {
-    void entry.task.destroy();
-  }
   pending.clear();
 }

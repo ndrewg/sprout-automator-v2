@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { parseHhmm } from "../../src/config";
 import {
   currentPolicy,
@@ -9,9 +9,14 @@ import {
   type RetryPolicy,
 } from "../../src/services/retry";
 import {
+  cancelPendingRetry,
+  clearPendingRetries,
+  fireDueRetries,
+  hasPendingRetry,
   manilaWallTime,
-  wallTimeCronExpr,
+  scheduleOneShotRetry,
 } from "../../src/services/retry-registry";
+import { stopWallClockTick } from "../../src/lib/wall-clock-tick";
 
 // Phase 14 unit tests: the scheduling arithmetic is pure and takes an injected
 // clock — no Date.now() inside the schedulable logic (BACKLOG §11). The cutoff
@@ -27,16 +32,53 @@ const POLICY: RetryPolicy = {
 // A failure at 05:35 Manila on Monday 2026-08-10.
 const FAILED_AT = new Date("2026-08-10T05:35:00+08:00");
 
-describe("manilaWallTime / wallTimeCronExpr", () => {
+describe("manilaWallTime", () => {
   it("formats an instant as Manila HH:mm", () => {
     expect(manilaWallTime(new Date("2026-08-10T05:35:00+08:00"))).toBe("05:35");
     // UTC 2026-08-10T01:00:00Z is 09:00 Manila (UTC+8).
     expect(manilaWallTime(new Date("2026-08-10T01:00:00Z"))).toBe("09:00");
   });
+});
 
-  it("builds a 5-field cron expression from a wall time", () => {
-    expect(wallTimeCronExpr("05:35")).toBe("35 5 * * *");
-    expect(wallTimeCronExpr("23:00")).toBe("0 23 * * *");
+describe("fireDueRetries — tick-driven one-shot retries", () => {
+  const USER = "u1";
+  const DATE = "2026-08-10";
+  const FIRE_AT = new Date("2026-08-10T06:05:00+08:00");
+
+  function schedule(onFire: () => void): void {
+    scheduleOneShotRetry({
+      userId: USER,
+      action: "in",
+      manilaDate: DATE,
+      attempt: 1,
+      fireAt: FIRE_AT,
+      onFire,
+    });
+  }
+
+  afterEach(() => {
+    clearPendingRetries();
+    stopWallClockTick();
+  });
+
+  it("does not fire before fireAt", () => {
+    let fired = 0;
+    schedule(() => void fired++);
+    fireDueRetries(new Date(FIRE_AT.getTime() - 1));
+    expect(fired).toBe(0);
+  });
+
+  it("fires on a tick however late it is, exactly once, and stays pending until cancelled", () => {
+    let fired = 0;
+    schedule(() => void fired++);
+    // 27 minutes late: what killed the node-cron version (2026-10-13).
+    fireDueRetries(new Date(FIRE_AT.getTime() + 27 * 60 * 1000));
+    fireDueRetries(new Date(FIRE_AT.getTime() + 28 * 60 * 1000));
+    expect(fired).toBe(1);
+    // attemptRun cancels once it has run; until then the sweep must stay quiet.
+    expect(hasPendingRetry(USER, "in", DATE)).toBe(true);
+    cancelPendingRetry(USER, "in", DATE);
+    expect(hasPendingRetry(USER, "in", DATE)).toBe(false);
   });
 });
 

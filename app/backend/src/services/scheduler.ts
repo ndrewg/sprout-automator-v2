@@ -1,27 +1,48 @@
-import cron, { type ScheduledTask, type TaskContext } from "node-cron";
-import { eq } from "drizzle-orm";
+import { and, eq, gte } from "drizzle-orm";
 import { config } from "../config";
 import { db } from "../db/client";
-import { schedules, type Schedule } from "../db/schema";
+import { runs, schedules, type Schedule } from "../db/schema";
 import { logger } from "../lib/logger";
-import { isPausedOn } from "../lib/ph-holidays";
+import { isPausedOn, manilaDateString } from "../lib/ph-holidays";
+import { onTick, TICK_MS } from "../lib/wall-clock-tick";
 import { resolveHolidayDecision } from "./holidays";
 import { startRun } from "./runs";
-import { sweepMissedRuns, notifyHolidaySkip } from "./notifications";
+import {
+  expectedFireTime,
+  isWeekend,
+  notifyHolidaySkip,
+  sweepMissedRuns,
+} from "./notifications";
 import { pingHeartbeat } from "../lib/heartbeat";
 import type { ClockAction } from "../automation/clock";
 
-type UserTasks = { clockIn: ScheduledTask; clockOut: ScheduledTask };
+// The per-user daily scheduler (D8, reworked 2026-10-13).
+//
+// No timers per schedule. Registered schedules live in `active`; the shared
+// wall-clock tick (lib/wall-clock-tick.ts, every 15 s) asks dueSlots() which
+// Mon–Fri Manila slots have arrived and fires each ONCE per day. It replaced
+// two node-cron tasks per user: node-cron slept on one long setTimeout per
+// slot, and on the scheduled host the monotonic clock drifts so far from the
+// wall clock (up to ~450 s/day measured) that the 05:30 slot woke 27 min late
+// and was dropped. Comparing against the wall clock on a short tick means a
+// late tick delays a run by seconds and never skips it.
 
-// userId -> the two live cron tasks. Module-global on purpose: one scheduler
-// per process.
-const active = new Map<string, UserTasks>();
+// userId -> the registered (enabled) schedule row. Module-global on purpose:
+// one scheduler per process.
+const active = new Map<string, Schedule>();
 
-// Timestamp (ISO) of the last cron fire, any user, any action. Updated at the
-// top of fireCron — the moment cron actually invoked the scheduler — regardless
-// of whether the fire then enqueued a run, skipped a holiday, or was paused.
-// Exposed to /health so an uptime monitor can see cron is alive, not just that
-// the process is up. NULL until the first fire (see 12A).
+// "userId::action::manilaDate" keys already fired today. Pruned to today on
+// every tick. In-memory, so a restart forgets it — fireDueSlot's DB check is
+// what stops a restarted process firing a slot twice.
+const fired = new Set<string>();
+
+const SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+let lastSweepBucket: number | null = null;
+
+// Timestamp (ISO) of the last scheduled fire, any user, any action. Updated at
+// the top of fireCron regardless of whether the fire then enqueued a run,
+// skipped a holiday, or was paused. Exposed to /health. NULL until the first
+// fire (see 12A).
 let lastFireAt: string | null = null;
 
 export function schedulerLastFireAt(): string | null {
@@ -38,137 +59,75 @@ export async function enabledScheduleCount(): Promise<number> {
 }
 
 /**
- * "05:30" or "05:30:00" -> "30 5 * * 1-5" (weekdays Mon–Fri).
- * The Mon–Fri restriction lives in the cron expression, not the handler.
+ * How long after its slot a run may still start. Equal to the missed-run grace
+ * window on purpose: past it, the sweep has already alerted the slot as missed,
+ * so firing then would contradict the alert.
  */
-export function timeToCronExpression(time: string): string {
-  const parts = time.split(":");
-  const hour = Number(parts[0]);
-  const minute = Number(parts[1]);
-  if (!Number.isInteger(hour) || hour < 0 || hour > 23) {
-    throw new Error(`Invalid hour in time: ${time}`);
-  }
-  if (!Number.isInteger(minute) || minute < 0 || minute > 59) {
-    throw new Error(`Invalid minute in time: ${time}`);
-  }
-  return `${minute} ${hour} * * 1-5`;
+function fireWindowMs(): number {
+  return config.MISSED_RUN_GRACE_MINUTES * 60 * 1000;
 }
 
-// ---------------------------------------------------------------------------
-// Diagnostic instrumentation (2026-09-30).
-//
-// node-cron v4 emits these events and NOTHING in this app subscribed to them,
-// so a dropped slot was completely silent — which is why three weeks of
-// scheduled runs went missing without a single log line. In particular v4 does
-// NOT run a late task: planBeat() discards any slot whose lateness exceeds
-// `missedExecutionTolerance` (default 1000 ms), emits 'execution:missed', and
-// re-arms for the next slot.
-//
-// `lateByMs` is the number that matters: it is triggeredAt - date, i.e. how
-// far past the scheduled instant the heartbeat actually woke up.
-//
-// Deliberately logs only scalars — TaskContext carries a `task` back-reference
-// that would make the pino payload circular.
-// ---------------------------------------------------------------------------
-const INSTRUMENTED_EVENTS = [
-  "execution:missed",
-  "execution:skipped",
-  "execution:overlap",
-  "execution:failed",
-  "task:stopped",
-] as const;
+const slotKey = (userId: string, action: ClockAction, manilaDate: string) =>
+  `${userId}::${action}::${manilaDate}`;
 
-function instrumentTask(
-  task: ScheduledTask,
-  meta: { userId?: string; action?: string; expression: string },
-): void {
-  for (const event of INSTRUMENTED_EVENTS) {
-    task.on(event, (ctx: TaskContext) => {
-      const scheduled = ctx.date?.getTime();
-      const woke = ctx.triggeredAt?.getTime();
-      logger.warn(
-        {
-          ...meta,
-          event,
-          scheduledFor: ctx.date?.toISOString(),
-          scheduledLocal: ctx.dateLocalIso,
-          triggeredAt: ctx.triggeredAt?.toISOString(),
-          lateByMs:
-            scheduled !== undefined && woke !== undefined
-              ? woke - scheduled
-              : undefined,
-          reason: ctx.reason,
-          errName: ctx.error?.name,
-          errMessage: ctx.error?.message,
-        },
-        "cron task event",
-      );
-    });
+export type DueSlot = {
+  userId: string;
+  action: ClockAction;
+  manilaDate: string;
+  slot: Date;
+};
+
+/**
+ * Pure: the slots due at `now`. A slot is due on a Manila weekday (Mon–Fri)
+ * from its wall time up to `windowMs` after it, unless already fired. Holidays
+ * and pause windows are NOT checked here; fireCron checks them at fire time,
+ * so holiday data can change without re-registering anything.
+ *
+ * A schedule edited to a time that passed less than `windowMs` ago fires on the
+ * next tick. That is intended: the slot is still inside its on-time window.
+ */
+export function dueSlots(
+  rows: Iterable<Schedule>,
+  now: Date,
+  alreadyFired: ReadonlySet<string>,
+  windowMs: number,
+): DueSlot[] {
+  const manilaDate = manilaDateString(now);
+  if (isWeekend(manilaDate)) return [];
+  const due: DueSlot[] = [];
+  for (const row of rows) {
+    if (!row.enabled) continue;
+    for (const action of ["in", "out"] as const) {
+      const time = action === "in" ? row.clockInTime : row.clockOutTime;
+      const slot = expectedFireTime(manilaDate, time);
+      const lateBy = now.getTime() - slot.getTime();
+      if (lateBy < 0 || lateBy >= windowMs) continue;
+      if (alreadyFired.has(slotKey(row.userId, action, manilaDate))) continue;
+      due.push({ userId: row.userId, action, manilaDate, slot });
+    }
   }
-}
-
-// The daily tasks' late-wake tolerance — the root cause of every scheduled run
-// missed since 2026-09-14 (diagnosed 2026-10-07). node-cron v4 sleeps on ONE
-// setTimeout per slot (up to 24h for a daily task) but computes that delay from
-// the wall clock, while setTimeout runs on the monotonic clock. Inside the
-// Docker Desktop WSL2 VM the wall clock gains ~57 s/day on the monotonic one
-// (measured in the container), so a daily timer wakes about a minute late by
-// wall time, planBeat() rejects the slot against the default 1000 ms tolerance,
-// emits execution:missed and re-arms for the next day. Every day. The */5 sweep
-// wakes ~200 ms late, inside the default, which is why it kept working.
-//
-// Tolerance = the missed-run grace window, on purpose: a fire inside it is "on
-// time" by the sweep's own definition (the sweep sees the run and stays quiet),
-// and anything later has already been alerted as missed.
-export function dailyTaskOptions(): {
-  timezone: string;
-  missedExecutionTolerance: number;
-} {
-  return {
-    timezone: "Asia/Manila",
-    missedExecutionTolerance: config.MISSED_RUN_GRACE_MINUTES * 60 * 1000,
-  };
+  return due;
 }
 
 export function registerSchedule(row: Schedule): void {
-  // Atomic swap: always clear any existing tasks first.
+  // Atomic swap: always clear any existing registration first.
   unregisterSchedule(row.userId);
   if (!row.enabled) return;
-
-  const inExpr = timeToCronExpression(row.clockInTime);
-  const outExpr = timeToCronExpression(row.clockOutTime);
-  const clockIn = cron.schedule(
-    inExpr,
-    () => void fireCron(row.userId, "in"),
-    dailyTaskOptions(),
-  );
-  const clockOut = cron.schedule(
-    outExpr,
-    () => void fireCron(row.userId, "out"),
-    dailyTaskOptions(),
-  );
-  instrumentTask(clockIn, { userId: row.userId, action: "in", expression: inExpr });
-  instrumentTask(clockOut, {
-    userId: row.userId,
-    action: "out",
-    expression: outExpr,
-  });
-  active.set(row.userId, { clockIn, clockOut });
+  active.set(row.userId, row);
   logger.info(
-    { userId: row.userId, in: inExpr, out: outExpr, timezone: "Asia/Manila" },
+    {
+      userId: row.userId,
+      in: row.clockInTime,
+      out: row.clockOutTime,
+      days: "Mon-Fri",
+      timezone: "Asia/Manila",
+    },
     "schedule registered",
   );
 }
 
 export function unregisterSchedule(userId: string): void {
-  const tasks = active.get(userId);
-  if (!tasks) return;
-  // node-cron v4 types stop() as void | Promise<void> (inline tasks — the ones
-  // this scheduler creates — return void at runtime); the union makes oxlint's
-  // no-floating-promises flag it, so mark the deliberate non-await explicitly.
-  void tasks.clockIn.stop();
-  void tasks.clockOut.stop();
-  active.delete(userId);
+  if (!active.delete(userId)) return;
   logger.info({ userId }, "schedule unregistered");
 }
 
@@ -188,36 +147,107 @@ export async function loadAllSchedules(): Promise<number> {
 }
 
 /**
- * The missed-run reconciliation sweep: ONE global task for all users, started
- * at boot (from index.ts). A process that is down cannot report that it is
- * down, so a sweep on a live process reconciles what should have happened
- * against what did. sweepMissedRuns never throws across the cron boundary.
+ * Fire one due slot. Skips it when a run for this user and action already
+ * started at or after the slot: the user clicked first, or a previous process
+ * fired it and then restarted inside the window. If that lookup fails, fire
+ * anyway — a missed clock-in is worse than a duplicate, and the automation's
+ * already-clocked guard turns a duplicate into `skipped`.
  */
-export function startMissedRunSweep(): void {
-  // Instrumented too, on purpose: this task is the CONTROL. It has kept working
-  // while the two daily tasks stopped firing entirely, so whatever it does or
-  // does not report is the baseline the daily tasks are measured against.
-  const sweep = cron.schedule("*/5 * * * *", () => void sweepMissedRuns(), {
-    timezone: "Asia/Manila",
-  });
-  instrumentTask(sweep, { expression: "*/5 * * * *" });
+async function fireDueSlot(due: DueSlot, now: Date): Promise<void> {
+  const lateByMs = now.getTime() - due.slot.getTime();
+  try {
+    const existing = await db
+      .select({ id: runs.id })
+      .from(runs)
+      .where(
+        and(
+          eq(runs.userId, due.userId),
+          eq(runs.action, due.action),
+          gte(runs.startedAt, due.slot),
+        ),
+      )
+      .limit(1);
+    if (existing.length > 0) {
+      logger.info(
+        { userId: due.userId, action: due.action, runId: existing[0]!.id },
+        "scheduled slot already has a run — not firing",
+      );
+      return;
+    }
+  } catch (err: unknown) {
+    logger.error(
+      { userId: due.userId, action: due.action, err },
+      "scheduled slot run lookup failed — firing anyway",
+    );
+  }
   logger.info(
-    { expression: "*/5 * * * *", timezone: "Asia/Manila" },
-    "missed-run sweep registered",
+    {
+      userId: due.userId,
+      action: due.action,
+      slot: due.slot.toISOString(),
+      lateByMs,
+    },
+    "scheduled slot due",
+  );
+  await fireCron(due.userId, due.action);
+}
+
+/** One tick: fire due slots, then the missed-run sweep every 5 minutes. */
+export async function schedulerTick(now: Date): Promise<void> {
+  const today = manilaDateString(now);
+  for (const k of fired) {
+    if (!k.endsWith(`::${today}`)) fired.delete(k);
+  }
+  for (const due of dueSlots(active.values(), now, fired, fireWindowMs())) {
+    // Claim before any await, so an overlapping tick can't fire it twice.
+    fired.add(slotKey(due.userId, due.action, due.manilaDate));
+    void fireDueSlot(due, now);
+  }
+  // The missed-run sweep: ONE global pass for all users, on the first tick of
+  // every 5-minute wall-clock window (and once at boot). A process that is
+  // down cannot report that it is down, so a sweep on a live process
+  // reconciles what should have happened against what did. It only alerts on
+  // slots past the fire window, so it never races a slot this tick fired.
+  // sweepMissedRuns never throws.
+  const bucket = Math.floor(now.getTime() / SWEEP_INTERVAL_MS);
+  if (bucket !== lastSweepBucket) {
+    lastSweepBucket = bucket;
+    await sweepMissedRuns();
+  }
+}
+
+/** Start the scheduler on the shared wall-clock tick. Called once at boot. */
+export function startScheduler(): void {
+  onTick("scheduler", schedulerTick);
+  logger.info(
+    {
+      tickMs: TICK_MS,
+      fireWindowMinutes: config.MISSED_RUN_GRACE_MINUTES,
+      sweepEveryMinutes: SWEEP_INTERVAL_MS / 60_000,
+      timezone: "Asia/Manila",
+    },
+    "scheduler started on wall-clock tick",
   );
 }
 
+/** Test hook: forget registrations, fired slots and the sweep window. */
+export function resetSchedulerState(): void {
+  active.clear();
+  fired.clear();
+  lastSweepBucket = null;
+}
+
 /**
- * Fired by cron. Holiday check FIRST, then the pause window, then enqueue a
- * run. Must never throw across the cron boundary, and does NOT await execution.
- * The `now` param is for tests only — the cron call path uses the default.
+ * Fired by the scheduler tick. Holiday check FIRST, then the pause window, then enqueue a
+ * run. Must never throw across the tick boundary, and does NOT await execution.
+ * The `now` param is for tests only — the tick path uses the default.
  */
 export async function fireCron(
   userId: string,
   action: ClockAction,
   now: Date = new Date(),
 ): Promise<void> {
-  // Record the fire first — cron is alive whether or not the fire then enqueues
+  // Record the fire first — the scheduler is alive whether or not the fire then enqueues
   // a run. /health reads this as the "scheduler last fired" timestamp (12A).
   lastFireAt = now.toISOString();
   // Dead-man's-switch heartbeat: ping outward on EVERY fire, before anything

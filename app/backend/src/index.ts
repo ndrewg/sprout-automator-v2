@@ -5,7 +5,7 @@ import { trustedCloudflarePeerCount } from "./middleware/security";
 import { app } from "./app";
 import { recoverOrphanedRuns, runQueue } from "./services/run-queue";
 import { executeQueuedRun } from "./services/runs";
-import { loadAllSchedules, startMissedRunSweep } from "./services/scheduler";
+import { loadAllSchedules, startScheduler } from "./services/scheduler";
 import { startGazetteRefresh } from "./services/gazette";
 
 // Backstop for anything the run executor's .catch or the app's error handler
@@ -55,13 +55,14 @@ async function start(): Promise<void> {
     logger.info({ recovered }, "recovered orphaned runs from previous shutdown");
   }
 
-  // Rehydrate enabled schedules from the DB into the in-process cron scheduler.
+  // Rehydrate enabled schedules from the DB into the in-process scheduler.
   const scheduleCount = await loadAllSchedules();
   logger.info({ scheduleCount }, "loaded schedules from database");
 
-  // One global sweep for ALL users — a missed run is invisible unless the
-  // process that survived to report it reconciles it.
-  startMissedRunSweep();
+  // The wall-clock tick: fires due daily slots and runs the global missed-run
+  // sweep — a missed run is invisible unless the process that survived to
+  // report it reconciles it.
+  startScheduler();
 
   // Nightly Official Gazette refresh (cache-first advisory layer). Non-blocking:
   // a cold cache degrades to the library, and a slow first fetch must not delay
