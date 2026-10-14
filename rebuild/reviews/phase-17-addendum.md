@@ -122,3 +122,80 @@ Carried forward from the phase file's table (rows 1–5), plus the migration/dep
 ---
 
 *End of addendum. Restoration proof: after all nine probes, `git diff` over `app/backend/src` is identical to the implementer's pre-probe diffstat and contains no probe markers; the only file this tester added is this addendum.*
+
+---
+---
+
+# Fixture round — 2026-10-14 (round 2): the deferred redacted card snapshot (§ 17B "Tests (fixtures)" / manual row 5)
+
+**Tester session:** 2026-10-14, work PC (`hostname` = `DESKTOP-3SV8V8A`, confirmed before touching anything). Scope: the operator-directed deferred item — new `app/backend/test/fixtures/attendance-card-2026-10-14.txt` + a new `describe("attendance card — real snapshot (2026-10-14)")` with 3 tests in `test/automation/attendance-card.test.ts`. **This round closes the phase's deferred redacted-snapshot item** (fixture supplied + parser test added + proven able to fail).
+
+## A — Structural verification (round 2)
+
+**A1 — Gates, re-run by me (not pasted from the report):**
+
+| Gate | Command | Result |
+|---|---|---|
+| Lint | `cd app/backend && pnpm lint` | ✅ exit 0 (oxlint) |
+| Typecheck | `pnpm typecheck` | ✅ exit 0 |
+| Unit | `pnpm test` | ✅ **329 passed / 329** (29 files) — phase 18D's 326 + the 3 new snapshot tests; nothing dropped |
+| Integration | `pnpm test:integration` | ✅ **190 passed / 190** (33 files) — matches phase 18D's 190; Postgres up via the already-running `sprout-postgres`, tests hit `sprout_test` only |
+
+No count went down. No container was recreated; no write to live `sprout`; no migration was generated (`drizzle/` untouched in `git status` — correct, this is a test-only change).
+
+**A2 — PII review of the fixture (the BLOCKING-if-fail check) — PASS.** Hex dump of the file: **151 bytes, every byte ≤ 0x7F — ASCII-only**, LF line endings, rows TAB-separated (`09`). Content: chrome lines `Attendance`, `Clock In/Out ` (one trailing space), `Clock In`, `Clock Out`, `Show Team Attendance`; four rows `10/14/26 OUT 04:16 PM`, `10/14/26 IN 05:30 AM`, `10/13/26 OUT 04:15 PM`, `10/13/26 IN 05:51 AM`. **No names, no employee IDs, no email addresses, no non-ASCII, nothing identifying a person** — only dates, IN/OUT labels, times and widget chrome. Safe to commit.
+
+**A3 — Diff vs report.** `git status --porcelain` shows exactly: ` M app/backend/test/automation/attendance-card.test.ts` (+63 lines: 2 imports + the new describe with 3 tests — read line-by-line, matches the report), `?? app/backend/test/fixtures/` (the one new fixture), plus the **out-of-scope** pre-existing entries (`.opencode/agent/orchestrator.md`, `opencode.json`) and the **untracked raw captures** (`Employee Dashboard _ Sprout HR.html`, `Employee Dashboard _ Sprout HR_files/`, `screencapture-…png`, `view-source_….html`) which remain untracked and must not be committed. **`git check-ignore` on the fixture exits 1 → the fixture is NOT ignored** (it will be stageable). No source file changed but unreported.
+
+**A4 — Fault injection: every new test proven able to fail.** I broke the data and the expectation in turn, ran `vitest run test/automation/attendance-card.test.ts` each time, and restored byte-exact (SHA256 verified against the pre-probe baseline `DE74643A…` fixture / `5DB931FC…` test file):
+
+| # | Probe (temporary, since reverted) | Result — which assertion fired |
+|---|---|---|
+| 1 | Fixture `05:30 AM` → `05:31 AM` | **RED**, test (a): `AssertionError: expected '10/14/26\tIN\t05:31 AM' to be '10/14/26\tIN\t05:30 AM'` at the `inRow` assertion (`attendance-card.test.ts:161`) |
+| 2 | Append `Juan Dela Cruz\t1234` to the fixture | **RED**, guard (c): the `isRow \|\| isChrome` assertion at line 196 (`unexpected fixture line (possible unredacted data?)`) |
+| 3 | Test's expected `outRow` `04:16 PM` → `04:17 PM` | **RED**, test (a): `expected '10/14/26\tOUT\t04:16 PM' to be '…04:17 PM'` at the `outRow` assertion |
+| 4 (mine) | Fixture IN-row date `10/14/26` → `10/15/26` | **RED ×2** — test (a) fails (`inPresent` false) **and** test (b) fails (`inPresent` expected false, got true) — so the "later day" test also has real discriminating power, not a vacuous pass |
+
+After all restores: both files' SHA256 identical to baseline, the snapshot file green 16/16, and the **full unit suite re-ran 329/329**. `git status` identical to pre-probe.
+
+**A5 — Locator-fidelity claim — chain CONFIRMED, extraction reproduced only in part (see B1).**
+- The chain described in the report is **byte-for-byte the chain in `readCardText()`** (`src/automation/playwright-portal.ts:157-162`): `locator("text=Attendance")` → `locator("xpath=ancestor::*[contains(@class,'card') or contains(@class,'Card') or contains(@class,'panel') or contains(@class,'widget') or contains(@class,'section')]")` → `.first()`; same element engine, same ancestor class list, same `.first()`. ✅
+- **Row format matches parser + HRHub:** the saved capture (`Employee Dashboard _ Sprout HR.html`, untracked) contains each attendance row as a `<tr>` of **three `<td>`s** (`convertToProperDate(LogTime)` → `10/14/26` = `MM/DD/YY`; the IN/OUT span; `convertToProperTime(LogTime)` → `04:16 PM` = `hh:mm AM/PM`). Chromium's `innerText` renders table cells **tab-separated on one line**, exactly the fixture's `date\tIN|OUT\ttime` shape the parser expects (`attendance-card.ts`, `SLASH_DATE` + word-boundary `IN`/`OUT`). Every fixture value (`10/13/26`, `10/14/26`, all four times) and every chrome string (`Clock In/Out ` + caret — the trailing space is real markup — `Clock In`, `Clock Out`, `Show Team Attendance`, `No Current Logs`) is present in the capture. **The fixture is genuine dashboard data, in the genuine row shape.**
+- **Reproduction check (the one caveat):** I loaded the saved "Webpage, Complete" HTML in headless Chromium and ran the exact chain myself. It resolves to `div.col-md-6.widget` (the class the report claims) — but its `innerText` is `Attendance\nNo Current Logs\nShow Team Attendance`, **not** the fixture: the static file holds several stale Attendance-widget instances (an SPA template), the rows are baked into one with contradictory knockout `visible:` bindings, and the chain's `.first()` lands on an empty-state instance. See B1.
+
+## B — Defects found (round 2)
+
+**No BLOCKING defects.** The fixture is PII-clean, all three tests can fail, and the row shape is corroborated by the real capture. The items below are low-severity.
+
+1. **(Low — provenance/doc, B1) "Extracted from the saved capture with the exact locator chain" is not reproducible from the saved file.** The chain run over `Employee Dashboard _ Sprout HR.html` yields the empty state ("No Current Logs"), not the fixture (A5). The fixture's values are all present in that file, so it *is* real capture data — the honest provenance is: innerText taken from the **live page** (attendance logs loaded) at capture time, with every value independently confirmed against the saved DOM. *Failure scenario:* a future session tries to regenerate the fixture from the saved HTML, sees "No Current Logs", and concludes the fixture or the parser is wrong. Reviewer: ask for one comment-wording tweak in the test header (and the handoff's claim corrected) — no behaviour change needed; the test itself is sound.
+2. **(Low — guard strength) The redaction guard accepts any line that merely *contains* a parseable date.** Probe: appending `Maria Clara Santos (employee 1234) 10/14/26 IN 05:30 AM` leaves the suite **green** — `parseRowDate(line) !== null` is a substring test, so a name/ID riding on a dated line passes `isRow`. It catches bare appended name lines (probe 2) but is a shape check, not a PII detector. *Failure scenario:* a future fixture refresh concatenates a name onto a row line; the guard won't flag it — the human redaction review (manual row 5's human half, now row 11) remains the real control. Not blocking.
+3. **(Note — ledger staleness, reviewer action) The phase file's as-built note 5** ("The card-parser fixtures are DELAYED, and no fixture file was added") **and STATE.md's phase-17 row** ("the deferred card snapshot") **are now stale** — this round closes that item. Update both in the same commit (AGENTS.md "Keep the ledger current"); the tester does not edit them.
+
+## C — What I could not verify, and why (round 2)
+
+- **That the live widget still renders this exact innerText *today*.** The fixture pins a 2026-10-14 capture; only a live HRHub read (manual row 11) can confirm no drift since. That residual risk is the fixture's whole purpose and is irreducible from here.
+- **The moment of extraction itself.** I could not replay the live page with logs loaded; I could only corroborate every value against the saved static DOM (which renders the empty state — a property of the serialized file, not evidence about the live page at capture time).
+- **Whether `.first()` picks the *rendered* widget on the live dashboard** among the page's other `text=Attendance` matches (menu links, "Attendance Summary" in My Stuff, the Resolution Center widget). On the live DOM the other matches are links/labels with no card-class ancestor, so the chain skips them — but that was proven only against the saved DOM; a live check is manual row 1's log line ("Card IN row …").
+- **No DB / integration / e2e surface:** this round changed only a fixture and unit tests; `sprout_test` was touched solely by the integration suite as usual; no migration was generated or needed.
+- **Flakiness protocol:** each suite run once from warm (unit re-run 3× around probes with stable 329); the twice-from-cold protocol (15E) was not repeated — unchanged scope.
+
+## D — `[manual]` checks (human only — results column deliberately empty)
+
+Rows 1–4 and 6–10 are carried forward unchanged from round 1 (nothing ticked). **Row 5 is CLOSED by this round** (fixture supplied, parser test added, both proven able to fail — see A2/A4). New row 11 records the fixture's ongoing drift check.
+
+| # | Check | Exact command / click sequence | Pass looks like | Results |
+|---|---|---|---|---|
+| 1–4 | (carried forward from round 1 — unchanged, unfilled) | as in round 1's table | as in round 1's table | |
+| 5 | ~~DEFERRED — operator's redacted card snapshot fixture~~ **CLOSED 2026-10-14** | Fixture `app/backend/test/fixtures/attendance-card-2026-10-14.txt` + 3 parser tests landed; PII-reviewed (ASCII-only, no names/IDs); all 3 proven red→green | — | **CLOSED** (round 2 § A2/A4) |
+| 6–10 | (carried forward from round 1 — unchanged, unfilled) | as in round 1's table | as in round 1's table | |
+| 11 | **NEW — fixture drift re-check on the next real card read** | After the next live run that reads the card (manual row 1), compare the run's logged IN/OUT row string against the fixture's row shape (`MM/DD/YY\tIN\|OUT\thh:mm AM/PM`); if the shapes differ, refresh the fixture and parser together | The live row string matches the fixture's shape; `cd app/backend && pnpm test` still green after any refresh | |
+
+## 🆕 LATEST, UP-TO-DATE TECH, CODE AND REFERENCES (round 2, checked 2026-10-14)
+
+- **No new dependencies** were added by this round (one `.txt` fixture + tests on existing deps). ✅
+- **APIs used by the new tests** (`node:fs` `readFileSync`, `node:url` `fileURLToPath`, vitest `describe/it/expect`) are current, non-deprecated for Node 22 / vitest 4. ✅
+- **Registry re-checked today:** `imapflow` latest 2.4.2 (installed ^1.7.2), `vitest` latest 5.0.4 (installed ^4.1.11), `playwright` latest 1.64.0 (pinned 1.60.0) — unchanged since round 1; still reported, still **not** bumped (correct: no dependency work in this round; reviewer decides follow-ups).
+
+---
+
+*End of round 2. Restoration proof: after all five probes, both probed files' SHA256 hashes are identical to their pre-probe baselines (`DE74643A…` fixture, `5DB931FC…` test file), the full unit suite re-ran 329/329, and `git status --porcelain` shows only the implementer's entries (modified test, new `test/fixtures/`, out-of-scope `.opencode`/`opencode.json`, untracked raw captures) plus this addendum. No git write command was run; nothing was fixed.*

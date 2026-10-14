@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   parseAttendanceCard,
@@ -132,5 +134,80 @@ describe("parseAttendanceCard", () => {
 
     // No dates at all → unreadable, never "not clocked today".
     expect(parsed.readable).toBe(false);
+  });
+});
+
+describe("attendance card — real snapshot (2026-10-14)", () => {
+  // The operator's real dashboard capture ("Webpage, Complete", 2026-10-14),
+  // reduced to the Attendance widget's innerText and committed under
+  // test/fixtures/. It carries only dates, IN/OUT labels and times — no names,
+  // no employee IDs — which is what makes it safe to keep in the repo.
+  //
+  // Provenance: the fixture is the widget's *rendered* innerText as serialised
+  // by the browser's "Webpage, Complete" save, read with JavaScript DISABLED.
+  // That matters: HRHub renders this widget through Knockout, so re-executing
+  // the page's own scripts against a dead backend resets the log list to its
+  // empty state ("No Current Logs"). Read the capture; do not re-run it.
+  //
+  // Every line is trimmed before parsing, so trailing whitespace is not
+  // load-bearing.
+  const cardText = readFileSync(
+    fileURLToPath(
+      new URL("../fixtures/attendance-card-2026-10-14.txt", import.meta.url),
+    ),
+    "utf8",
+  );
+
+  it("parses the real card and finds today's IN and OUT rows", () => {
+    const parsed = parseAttendanceCard(cardText, "2026-10-14");
+
+    expect(parsed.readable).toBe(true);
+    expect(parsed.unreadableReason).toBeNull();
+    expect(parsed.inPresent).toBe(true);
+    expect(parsed.outPresent).toBe(true);
+    // The exact lines the widget rendered — date, mode and time, tab-separated.
+    expect(parsed.inRow).toBe("10/14/26\tIN\t05:30 AM");
+    expect(parsed.outRow).toBe("10/14/26\tOUT\t04:16 PM");
+  });
+
+  it("is readable on a later day but reports nothing for it — earlier rows never leak", () => {
+    const parsed = parseAttendanceCard(cardText, "2026-10-15");
+
+    expect(parsed.readable).toBe(true);
+    expect(parsed.inPresent).toBe(false);
+    expect(parsed.outPresent).toBe(false);
+    expect(parsed.inRow).toBeNull();
+    expect(parsed.outRow).toBeNull();
+  });
+
+  it("carries no names or IDs — every line is a known chrome label or the exact row shape", () => {
+    // Deliberately STRICTER than the parser: `parseRowDate` is a substring match,
+    // so a line that carried a name or an employee ID alongside a date would
+    // still parse. This is a redaction guard on a committed fixture, so each line
+    // must be a known chrome label or match the row shape exactly — a name/ID
+    // line fails here and forces a re-check by eye.
+    const chrome = new Set([
+      "Attendance",
+      "Clock In/Out",
+      "Clock In",
+      "Clock Out",
+      "Show Team Attendance",
+      "No Current Logs",
+    ]);
+    const rowShape =
+      /^\d{2}\/\d{2}\/\d{2}\t(?:IN|OUT|BROKEN OT - IN|BROKEN OT - OUT)\t\d{2}:\d{2} (?:AM|PM)$/;
+    const lines = cardText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) {
+      const ok = chrome.has(line) || rowShape.test(line);
+      expect(
+        ok,
+        `unexpected fixture line (possible unredacted data?): ${JSON.stringify(line)}`,
+      ).toBe(true);
+    }
   });
 });
