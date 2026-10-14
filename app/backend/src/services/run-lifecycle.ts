@@ -253,19 +253,24 @@ export async function finishRun(
     }).catch(() => {}); // oxlint-disable-line promise/prefer-await-to-then -- sanctioned fire-and-forget idiom (#2), §03.
   }
 
+  // Reaching an outcome = anything but a failure that will be retried (15A).
+  const pinged = params.status !== "failure" || retry !== "retry";
+
   // The evening heads-up (phase 16D): ONE message about the next workday's
-  // decision, after a CLOCK-OUT run reaches an outcome — any status. A run that
-  // never happened (missed, or a skip with no run row) sends nothing; the
-  // missed-run alert covers that day. Once per user per Manila day, recorded in
-  // the database, and fire-and-forget so a dead Telegram endpoint can never
-  // change the run's status or timing (hard rule 11).
-  if (updated.action === "out") {
+  // decision, after a CLOCK-OUT run reaches an outcome — any status. A failure
+  // with a retry queued has NOT reached its outcome, so the heads-up waits for
+  // the retry chain to end (found in a sandbox run 2026-10-15: it used to go out
+  // beside "Clock-out failed — will retry"). A run that never happened (missed,
+  // or a skip with no run row) sends nothing; the missed-run alert covers that
+  // day. Once per user per Manila day, recorded in the database, and
+  // fire-and-forget so a dead Telegram endpoint can never change the run's
+  // status or timing (hard rule 11).
+  if (updated.action === "out" && pinged) {
     void d
       .notifyHeadsUp({ userId: updated.userId, now: opts.now ?? new Date() })
       .catch(() => {}); // oxlint-disable-line promise/prefer-await-to-then -- sanctioned fire-and-forget idiom (#2), §03.
   }
 
-  const pinged = params.status !== "failure" || retry !== "retry";
   if (pinged) d.pingHeartbeat();
 
   return { status: params.status, retry, notified, pinged };

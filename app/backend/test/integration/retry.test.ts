@@ -301,8 +301,10 @@ describe("retry on transient failure", () => {
       await vi.waitFor(() => {
         expect(giveUpDispatches().length).toBe(1);
       });
+      // Every failed attempt counts: the original plus N retries (the row count
+      // asserted below). It used to say N, one short (fixed 2026-10-15).
       expect(giveUpDispatches()[0]).toContain(
-        `failed ${policy.maxAttempts} times`,
+        `failed ${policy.maxAttempts + 1} times`,
       );
 
       // One row per attempt (original + N retries), all terminal, none active.

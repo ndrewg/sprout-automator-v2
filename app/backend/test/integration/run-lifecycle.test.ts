@@ -14,12 +14,14 @@ import { manilaDateString } from "../../src/services/workday";
 import {
   cancelPendingRetriesForUser,
   failRunFromExecutor,
+  finishRun,
   fireDueRetries,
   recoverOrphanedRuns,
   startRun,
   type LifecycleDeps,
 } from "../../src/services/run-lifecycle";
 import { findPendingRetry, hasPendingRetry } from "../../src/services/retry-state";
+import { notifyRetryGiveUp } from "../../src/services/retry";
 import {
   closeTestServer,
   createUser,
@@ -345,5 +347,44 @@ describe("run lifecycle", () => {
       .from(runs)
       .where(and(eq(runs.userId, userId), isNotNull(runs.retryAt)));
     expect(remaining).toHaveLength(0);
+  });
+  // Found in a sandbox run 2026-10-15: the evening heads-up went out beside
+  // "Clock-out failed — will retry", before the clock-out had an outcome.
+  it("the heads-up waits for a clock-out OUTCOME: not on a failure with a retry queued, yes on a give-up or success", async () => {
+    const { userId } = await userWithCredentials();
+    const headsUps: string[] = [];
+    const rec = recordingDeps();
+    const deps: Partial<LifecycleDeps> = {
+      ...rec.deps,
+      notifyHeadsUp: async (params) => {
+        headsUps.push(params.userId);
+        return "sent";
+      },
+    };
+
+    const first = await startRun({ userId, action: "out" });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const failed = await finishRun(
+      { run: first.run, status: "failure", error: "boom: HRHub unreachable" },
+      { now: todayAtManila(16, 16), deps },
+    );
+    expect(failed.retry).toBe("retry");
+    expect(headsUps).toHaveLength(0);
+
+    await cancelPendingRetriesForUser(userId);
+    const second = await startRun({ userId, action: "out" });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    await finishRun({ run: second.run, status: "success" }, { now: todayAtManila(16, 47), deps });
+    expect(headsUps).toEqual([userId]);
+  });
+
+  it("the give-up message counts every failed attempt, not just the retries", async () => {
+    const { userId } = await userWithCredentials();
+    await notifyRetryGiveUp({ userId, action: "in", attempt: 2, error: "boom" });
+    await notifyRetryGiveUp({ userId, action: "out", attempt: 0, error: "boom" });
+    expect(dispatched("gave up")[0]).toContain("Clock-in failed 3 times and gave up");
+    expect(dispatched("gave up")[1]).toContain("Clock-out failed and gave up");
   });
 });

@@ -163,6 +163,21 @@ export function ScheduleCalendar({ today }: { today: string }) {
       ?.focus();
   }, [selected]);
 
+  // The popover anchors to the selected day's button (a Radix virtual anchor),
+  // found by the same data attribute. A static anchor element pinned the
+  // popover to the panel's left edge, covering the day it describes on a phone.
+  const dayAnchor = useMemo(
+    () => ({
+      current: {
+        getBoundingClientRect: () =>
+          document
+            .querySelector<HTMLButtonElement>(`[data-day-iso="${selected}"]`)
+            ?.getBoundingClientRect() ?? new DOMRect(),
+      },
+    }),
+    [selected],
+  );
+
   const close = (): void => setSelected(null);
 
   const runAction = async (
@@ -293,9 +308,7 @@ export function ScheduleCalendar({ today }: { today: string }) {
           if (!open) setSelected(null);
         }}
       >
-        <PopoverAnchor asChild>
-          <span aria-hidden className="sr-only" />
-        </PopoverAnchor>
+        <PopoverAnchor virtualRef={dayAnchor} />
         <PopoverContent
           aria-label="Day details"
           onCloseAutoFocus={(event) => {

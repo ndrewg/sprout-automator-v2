@@ -33,6 +33,32 @@ The host assumption (D12) was never re-derived for the laptop; that's phase 18. 
 
 **Numbering rule.** Completed phases (0–9, T, L) **never renumber** — they have git tags, commit messages and `reviews/phase-N-addendum.md` files pointing at them. Pending phases **are renumbered freely** so their numbers match this queue. When writing, say "phase 12" or "BACKLOG § 12" and never a bare "§ 12": those already mean different things.
 
+## 2026-10-15 — deploy, an outage, manual checks, CI and backlog
+
+**Deployed to the laptop 2026-10-14 21:26** (phases 15–18D, migrations `0008`–`0012`, `SCHEDULER_ENABLED=true`). Before migrating, **phase 15's `[manual]` row 1 passed**: a from-empty migrate of a scratch DB matched live `sprout` line for line (`pg_dump --schema-only`, 194 lines, 8 migrations each), and `0008`–`0012` applied cleanly to a full copy of the live data (84 runs kept). This also closes **phase 10's row 1**. Backup taken first: `~/sprout-backup-2026-10-14.sql`.
+
+**Missed clock-in 2026-10-15 (host, not app).** Windows Update rebooted the laptop at 23:07 (KB5127648 / KB5127690 kept failing with `0x80070BC9`, "reboot required"; active hours 03:00–21:00). Windows auto-signed in at 23:09, but **Docker Desktop's "Start when you sign in" was OFF** (`AutoStart: false`, its startup entry disabled), so the stack stayed down through 05:30. Phase 18A assumed that setting was on; it wasn't. The operator must turn it on (18A) and set up the outside monitor (18B); nothing else would have caught this.
+
+**`[manual]` checks run 2026-10-15 in an isolated sandbox.** Setup: the deployed image, its own Postgres, fake Telegram (`TELEGRAM_API_BASE`), fake heartbeat, HRHub on a closed port or a never-answering server; production untouched. **These prove app behaviour, not live HRHub or real Telegram delivery.**
+
+| Phase · row | Result |
+|---|---|
+| 4A browser CSP | ✅ Signup, every panel, saves, Telegram test, calendar: 0 CSP violations. Production serves the same CSP header |
+| 12 `/health` with DB down | ✅ 503, then 200 once the DB is back |
+| 13 bad `EXTRA_HOLIDAYS` | ✅ refuses to boot, naming entry 1 |
+| 14 retry discipline | ✅ one "will retry", silence between attempts, one "gave up" |
+| 15-3 restart with a retry pending | ✅ the retry survived (`retry_at` in DB) and fired after the restart |
+| 15-4 restart mid-run | ✅ SIGTERM: the run ended as a normal failure, notify + retry. SIGKILL: the next boot marked it `Interrupted by server restart` and queued a retry. The "one HRHub entry" part needs live HRHub |
+| 15-5 quiet boot (behaviour) | ✅ one "scheduler disabled" line, `/health` `enabled: false`. The real check is still on the work PC |
+| 15A heartbeat on outcome | ✅ pinged on give-up and on every skip, not on intermediate failures |
+| 16-1 calendar 375 px + desktop | ✅ after a fix: no sideways scroll at 375 px; holidays (All Souls' Day 11-02, Bonifacio Day 11-30) shown. **Bug found and fixed:** the day popover was pinned to the panel's left edge (an `sr-only` anchor) and covered the tapped day on a phone; it now uses a Radix virtual anchor on the selected day |
+| 16-2/16-3 (sandbox) | ✅ a skip day: no run, "⏭️ Skipping today: your skip day". A holiday marked "work anyway": it clocked in. A plain company holiday: a skip notice naming it. Setting today as a skip cancelled a pending retry |
+| 16-4 heads-up text | ✅ "Next: Fri 16 Oct 07:05 clock-in." **Bug found and fixed:** it went out after the clock-out's first failure, beside "will retry", before an outcome. It now waits for the outcome |
+
+**Also found and fixed:** the give-up message counted retries, not attempts ("failed 2 times" after 3 failures). **Still open:** the heads-up and skip-notice dashboard links use `APP_URL`, which is unset on the laptop, so they point at `http://localhost:3000`, useless on a phone until phase 19 gives the app a reachable URL.
+
+**CI fixed** (`be76ea5`): the blocking prod audit (`proxy-addr` critical, `nodemailer` highs) cleared by `express ^5.3.0` and `mailparser ^3.9.38`. **Backlog closed:** 6, 10, 11, 13, 14, 16, 19, 20, 22 (see `BACKLOG.md`). **Baseline now: 341 backend unit / 192 integration / 14 frontend unit / 22 e2e.** Note: the `.pre-commit-config.yaml` hooks (gitleaks, lint) are **not installed on the laptop**, so commits made there skip them; CI is the backstop.
+
 ## Deployment reality — read before touching the running system
 
 Facts that live nowhere in the code and are easy to get wrong.

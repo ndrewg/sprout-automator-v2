@@ -180,7 +180,14 @@ export async function notifyRetryGiveUp(
   try {
     await dispatch(
       run.userId,
-      renderRetryGiveUpMessage(run.action, run.attempt, run.error),
+      // `attempt` counts retries (0 = the scheduled run itself), so the number
+      // of failed attempts is attempt + 1. A run that gave up with no retry at
+      // all (cutoff passed, day rolled over) keeps the plain wording.
+      renderRetryGiveUpMessage(
+        run.action,
+        run.attempt === 0 ? 0 : run.attempt + 1,
+        run.error,
+      ),
       "retry",
     );
   } catch (err: unknown) {

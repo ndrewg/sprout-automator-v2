@@ -2,7 +2,19 @@
 
 Tags mark a phase as **provably complete, including its `[manual]` checks**. Executable gates are the agents' job; tags are yours, because only a human can confirm a Telegram message arrived, a browser rendered correctly, or a run reached live HRHub.
 
-Last reviewed: **2026-09-03**.
+Last reviewed: **2026-10-15**.
+
+> **2026-10-15 update.** The operator tagged **`phase-15-complete`, `phase-16-complete`, `phase-17-complete` and `phase-18D-complete` on 2026-10-14 as code-complete**, with honest messages saying the `[manual]` tables were still open (the phase-5 precedent below). Since then, on the laptop:
+> - **Done:** 15 row 1 (from-empty schema diff, which also closes **10 row 1**). In a sandbox: 15 rows 3, 4 and 5 (behaviour), 16 row 1, **4A** (0 CSP violations), and the quick rows of 12, 13 and 14. Results and caveats are in `STATE.md` § "2026-10-15".
+> - **Still needs a person or a date:** live HRHub (17 rows 1–4, 15 row 4's "one HRHub entry"), a real Telegram arriving on the phone, 2026-11-02 (11, 16 row 5), the next Eid / proclamation (13), the work-PC quiet boot (15 row 5 on the real host), and **18A–18C**.
+> - **4A can be tagged now:** its one browser check passed.
+>
+> | Phase | Outstanding |
+> |---|---|
+> | **15** | Live Telegram of the new messages; restart mid-run against live HRHub; work-PC quiet boot |
+> | **16** | 2026-11-02 heads-up and skip (row 5); a real 16:15 heads-up on the phone (row 4) |
+> | **17** | Rows 1–4, all live HRHub (the first one is the next scheduled clock-in) |
+> | **18** | 18A (Docker autostart: **was off, cost the 10-15 clock-in**), 18B (healthchecks.io), 18C (backup task + restore) |
 
 > **4B, L and 9 were tagged 2026-09-03**, closing the three that had nothing outstanding. Phases 10–14 have since shipped their code and joined the queue below. **Eleven phases now sit untagged**, which is the state this file exists to prevent: with nothing tagged, "what was actually finished?" has no answer but prose.
 
