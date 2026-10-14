@@ -181,6 +181,8 @@ The host is a ThinkPad E14 Gen 5: 40 GB RAM, 12 threads, 565 GB free — **more 
 
 > ✅ **CLOSED 2026-08-24 (phase 10).** All advisories cleared — both `pnpm audit --audit-level=high` and `--prod` report "No known vulnerabilities found". 10D implemented as recommended: the blocking CI audit is `--prod`, the full-tree audit is non-blocking. See the phase-10 STATE.md row and the phase file's as-built note for the version ladder (vitest 2→4, drizzle 0.36→0.45.2, node-cron 3→4) and the two scoped overrides that were unavoidable.
 
+> ✅ **Red again 2026-10-14, fixed 2026-10-15.** The blocking `--prod` audit failed on every push from `00619fa` to `51ee871`: `proxy-addr` <2.0.8 (critical, GHSA-jqcg-44mw-7w3h, via `express` 5.2.1) and `nodemailer` <10.0.6 (two highs, via `mailparser` 3.9.15). Fixed by raising `express` to `^5.3.0` (which requires `proxy-addr ^2.0.8`) and `mailparser` to `^3.9.38` (which pulls `nodemailer` 10.1.0); no override needed. `pnpm audit --prod --audit-level=high` then reported 6 moderate, 0 high; gates 329 unit / 190 integration unchanged. Same lesson as before: a live-advisory gate goes red with no commit behind it, which is § 20's case.
+
 ---
 
 ## 16. Runs table wraps values mid-label at 375 px
