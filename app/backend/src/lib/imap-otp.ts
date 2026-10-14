@@ -23,12 +23,31 @@ export type PollForOtpOptions = {
   /** Codes already submitted during this run — skip them so a retry cannot
    *  re-acquire the same stale email. */
   excludeCodes?: ReadonlySet<string>;
+  /**
+   * The instant this run asked HRHub for an OTP — when the login reached the
+   * OTP page (phase 17 § 17C). Every message received before this, minus a 60 s
+   * skew allowance, is discarded however tempting its code looks: a 16:15 run
+   * must never submit the code from the 05:30 mail.
+   */
+  requestedAfter?: Date | null;
+};
+
+/** The subset of the poll options that apply to a single fetch. */
+export type FetchOtpOptions = {
+  lookbackSeconds?: number;
+  excludeCodes?: ReadonlySet<string>;
+  requestedAfter?: Date | null;
 };
 
 const IMAP_HOST = "imap.gmail.com";
 const IMAP_PORT = 993;
 // Sprout HR's OTP sender, confirmed from a real OTP mail on 2026-09-10.
 const OTP_SENDER = "no-reply@sprout.ph";
+// Clock skew between Gmail's INTERNALDATE and this host. Gmail timestamps the
+// message when it ingests it, which can be slightly before our request instant
+// for a mail the request caused; 60 s is the allowance for that, not for
+// accepting genuinely older mail.
+const OTP_CLOCK_SKEW_MS = 60_000;
 
 function makeClient(creds: ImapCreds): ImapFlow {
   return new ImapFlow({
@@ -70,35 +89,54 @@ export async function testImapConnection(
 
 /**
  * Find the most recent Sprout OTP email and extract its code.
- * - Search Sprout-sender mail newer than `lookbackSeconds`, falling back to
- *   a date-only scan if the sender never matches.
- * - Pull at most a handful, sort by UID desc.
- * - Require an OTP marker, then take the code anchored to it (extractOtpCode).
+ *
+ * Two rules, both learned the hard way (phase 17 § 17C):
+ *
+ *  1. **Sprout's sender only.** There is no any-sender fallback any more. It
+ *     existed to survive an address change, but it silently widened the search
+ *     to anything in the window — and the marker gate cannot separate two
+ *     messages that both look like OTP notices. If Sprout changes address the
+ *     run fails with a message that NAMES that cause, which is a better failure
+ *     than a wrong code.
+ *  2. **Anchored to the request.** IMAP `SINCE` has DAY precision (RFC 3501), so
+ *     it can only bound the search. A message whose `internalDate` is earlier
+ *     than the OTP request instant (minus `OTP_CLOCK_SKEW_MS`) is discarded,
+ *     whatever its code. Without this, a slow mail let a 16:15 clock-out submit
+ *     the 05:30 code.
+ *
+ * Pull at most a handful, sort by UID desc, require an OTP marker, then take the
+ * code anchored to it (extractOtpCode).
  */
 export async function fetchLatestOtp(
   creds: ImapCreds,
-  lookbackSeconds = 300,
-  excludeCodes?: ReadonlySet<string>,
+  options: FetchOtpOptions = {},
 ): Promise<ImapFetchResult> {
+  const lookbackSeconds = options.lookbackSeconds ?? 300;
   const client = makeClient(creds);
   try {
     await client.connect();
     const lock = await client.getMailboxLock("INBOX");
     try {
-      const since = new Date(Date.now() - lookbackSeconds * 1000);
+      const requestedAfter = options.requestedAfter ?? null;
+      const notBefore =
+        requestedAfter === null
+          ? null
+          : new Date(requestedAfter.getTime() - OTP_CLOCK_SKEW_MS);
+      // Bounded by the request instant when we have one: IMAP SINCE is
+      // day-precision, so this narrows the search to the right day and the
+      // internalDate check below does the precise work.
+      const since = notBefore ?? new Date(Date.now() - lookbackSeconds * 1000);
+
       // Scope the search to Sprout's OTP sender. Bounded by date alone, ANY
       // mail arriving inside the lookback window competes on UID order, and a
       // newer unrelated message wins — that is what submitted a wrong code on
       // 2026-09-07..10. Sender confirmed from a real OTP mail on 2026-09-10.
-      let uids = await client.search({ since, from: OTP_SENDER }, { uid: true });
+      const uids = await client.search({ since, from: OTP_SENDER }, { uid: true });
       if (!uids || uids.length === 0) {
-        // Sprout may have changed the address — fall back to a date-only scan
-        // rather than never finding a code. extractOtpCode's OTP-marker gate
-        // still guards this path, so the fallback is narrower than the old
-        // behaviour even though it is wider than the filtered search.
-        uids = await client.search({ since }, { uid: true });
-      }
-      if (!uids || uids.length === 0) {
+        logger.info(
+          { since, sender: OTP_SENDER },
+          "no message from Sprout's OTP sender in the window",
+        );
         return { ok: false, reason: "no_message" };
       }
       // Sort UIDs descending — newer UIDs are larger numbers on Gmail.
@@ -111,6 +149,24 @@ export async function fetchLatestOtp(
           { uid: true },
         );
         if (!msg || !msg.source) continue;
+        const internalDate =
+          msg.internalDate instanceof Date
+            ? msg.internalDate
+            : msg.internalDate
+              ? new Date(msg.internalDate)
+              : null;
+        if (
+          notBefore !== null &&
+          internalDate !== null &&
+          internalDate.getTime() < notBefore.getTime()
+        ) {
+          // Earlier than this run's request: it cannot be the code we asked for.
+          logger.info(
+            { uid, internalDate, notBefore },
+            "OTP message predates this run's request — discarded",
+          );
+          continue;
+        }
         // Decode MIME so base64/quoted-printable bodies become readable text.
         const parsed = await simpleParser(msg.source);
         const subject = parsed.subject ?? msg.envelope?.subject ?? "";
@@ -121,7 +177,7 @@ export async function fetchLatestOtp(
           // HTML alt: strip tags so digits split across <span>s still match.
           (parsed.html || "").replace(/<[^>]+>/g, " "),
         ].join("\n");
-        const code = extractOtpCode(haystack, excludeCodes);
+        const code = extractOtpCode(haystack, options.excludeCodes);
         if (code) {
           // Sender and subject ONLY — never the code itself (hard rule 4).
           // This is what makes the next wrong-code incident self-diagnosing:
@@ -132,12 +188,7 @@ export async function fetchLatestOtp(
             ok: true,
             code,
             subject,
-            date:
-              msg.internalDate instanceof Date
-                ? msg.internalDate
-                : msg.internalDate
-                  ? new Date(msg.internalDate)
-                  : new Date(),
+            date: internalDate ?? new Date(),
           };
         }
       }
@@ -166,15 +217,24 @@ export async function pollForOtp(
     if (options.signal?.aborted) {
       throw new Error("IMAP polling aborted");
     }
-    const result = await fetchLatestOtp(
-      creds,
+    const result = await fetchLatestOtp(creds, {
       lookbackSeconds,
-      options.excludeCodes,
-    );
+      ...(options.excludeCodes !== undefined
+        ? { excludeCodes: options.excludeCodes }
+        : {}),
+      ...(options.requestedAfter !== undefined
+        ? { requestedAfter: options.requestedAfter }
+        : {}),
+    });
     if (result.ok) return result.code;
     await sleep(pollIntervalMs);
   }
-  throw new Error("IMAP polling timed out: no OTP email arrived");
+  // No fallback any more (17C): the sender is part of the contract, so a change
+  // in it is named here rather than papered over by scanning every sender.
+  throw new Error(
+    `No OTP mail from Sprout's sender within ${Math.round(timeoutMs / 60_000)} min ` +
+      `(expected ${OTP_SENDER}). If Sprout changed its sender address, that is why.`,
+  );
 }
 
 // Phrases that mark a message as an OTP notice. The IMAP search is bounded only

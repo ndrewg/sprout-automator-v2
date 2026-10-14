@@ -1,99 +1,25 @@
-// Reads the Attendance card on the dashboard and checks whether today already
-// has an IN or OUT entry, then performs the 4-step clock action against the
-// bootbox dialogs.
+// Performs the 4-step clock action against the bootbox dialogs.
+//
+// The already-clocked guard that used to live here is GONE (phase 17): reading
+// the attendance card, deciding whether to act at all, and deciding what the
+// result means are now the orchestration's job (clock-attempt.ts) and the
+// parser's (attendance-card.ts), because none of them was testable while it was
+// Playwright code. What remains here is the part that genuinely needs a Page.
+//
+// EVERY selector, wait and screenshot below is verbatim from the playbook
+// (reference/hrhub-automation-playbook.md) and re-confirmed against the live
+// dashboard markup on 2026-10-14:
+//   .clock-in-out-dropdown .dsk-btn / .mbl-btn -> .dropdown-menu a (Clock In/Out)
+//   -> .clock-in-dialog|.clock-out-dialog .our-button ("Yes")
+//   -> .clock-in-dialog|.clock-out-dialog .modal-title
+//      ("Time Entry Confirmation" / "Clocking Status Update") -> .btn-primary
+// AGENTS.md rule 10: do not tidy this file.
 
 import type { Page } from "playwright";
-import { manilaDateString } from "../services/workday";
+import type { ClockAction, ClockPressResult } from "./portal-seam";
 import { screenshot } from "./screenshot";
 
-export type ClockAction = "in" | "out";
-
-export type ClockActionResult = {
-  success: boolean;
-  message?: string;
-  error?: string;
-};
-
-/**
- * Returns whether today already has a row for the action we're about to
- * perform (skip), with the reason. Fail-safe: any unexpected condition returns
- * skipped: true — better to miss one auto-clock than to accidentally
- * double-clock. `reason` is the message already logged to the run's steps, so
- * the notifier can distinguish "matched row" (benign) from "could not verify"
- * (the user is probably NOT clocked in).
- */
-export async function isAlreadyClockedForToday(
-  page: Page,
-  action: ClockAction,
-  userId: string,
-  runId: string,
-  log?: (message: string) => void,
-): Promise<{ skipped: boolean; reason: string }> {
-  const label = action === "in" ? "IN" : "OUT";
-  const actionRegex = new RegExp(`\\b${label}\\b`);
-
-  const iso = manilaDateString(new Date()); // e.g. "2026-05-28"
-  const parts = iso.split("-");
-  const yyyy = parts[0]!;
-  const mm = parts[1]!;
-  const dd = parts[2]!;
-  const yy = yyyy.slice(-2);
-
-  const todayCandidates = [
-    `${mm}/${dd}/${yy}`, // 05/28/26
-    `${Number(mm)}/${Number(dd)}/${yy}`, // 5/28/26
-    `${yyyy}-${mm}-${dd}`, // 2026-05-28 ISO
-  ];
-
-  try {
-    const attendanceSection = page
-      .locator("text=Attendance")
-      .locator(
-        "xpath=ancestor::*[contains(@class,'card') or contains(@class,'Card') or contains(@class,'panel') or contains(@class,'widget') or contains(@class,'section')]",
-      )
-      .first();
-
-    let containerText: string;
-    if (await attendanceSection.isVisible().catch(() => false)) {
-      containerText = await attendanceSection.innerText();
-    } else {
-      const reason = `Could not locate Attendance card. Skipping ${label} as a safety measure.`;
-      log?.(reason);
-      await screenshot(page, userId, runId, "already-clocked-check-no-card");
-      return { skipped: true, reason };
-    }
-
-    const lines = containerText
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean);
-
-    const matchedLine = lines.find(
-      (line) =>
-        todayCandidates.some((d) => line.includes(d)) && actionRegex.test(line),
-    );
-
-    await screenshot(page, userId, runId, "already-clocked-check");
-
-    if (matchedLine) {
-      const reason = `Already clocked ${label} today (matched row "${matchedLine}") — skipping.`;
-      log?.(reason);
-      return { skipped: true, reason };
-    }
-
-    const reason = `No ${label} row found for ${todayCandidates[0]} — proceeding with clock action.`;
-    log?.(reason);
-    return { skipped: false, reason };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    const reason = `Could not verify clock state (${msg}). Skipping ${label} as a safety measure.`;
-    log?.(reason);
-    await screenshot(page, userId, runId, "already-clocked-check-error").catch(
-      () => {},
-    );
-    return { skipped: true, reason };
-  }
-}
+export type { ClockAction };
 
 export async function performClockAction(
   page: Page,
@@ -101,7 +27,7 @@ export async function performClockAction(
   userId: string,
   runId: string,
   log?: (message: string) => void,
-): Promise<ClockActionResult> {
+): Promise<ClockPressResult> {
   const actionLabel = action === "in" ? "Clock In" : "Clock Out";
 
   // Step 1: open dropdown — desktop button preferred, mobile fallback
@@ -161,10 +87,16 @@ export async function performClockAction(
     if (await okBtn.isVisible().catch(() => false)) {
       await okBtn.click();
     }
-    return { success: true, message: bodyText.trim() };
+    // Reported, not believed: the orchestration re-reads the card and the ROW
+    // decides. HRHub has been known to render a success dialog for an action
+    // the server did not perform (playbook invariant 4).
+    return { outcome: "confirmed", message: bodyText.trim() || null };
   }
 
-  // Error dialog path
+  // Error dialog path. HRHub's failure alert uses the SAME container class but
+  // a different title ("Clock In"/"Clock Out") and puts the server's message in
+  // the body — verified in the live markup 2026-10-14. No success title plus a
+  // non-empty body is therefore an explicit error, not a missing dialog.
   const errorBody = await page
     .locator(`${dialogClass} .bootbox-body`)
     .innerText()
@@ -175,12 +107,9 @@ export async function performClockAction(
     if (await okBtn.isVisible().catch(() => false)) {
       await okBtn.click();
     }
-    return { success: false, error: errorBody.trim() };
+    return { outcome: "error_dialog", error: errorBody.trim() };
   }
 
   await screenshot(page, userId, runId, `${action}-no-success-modal`);
-  return {
-    success: false,
-    error: "Clock action completed but no confirmation dialog appeared",
-  };
+  return { outcome: "no_dialog" };
 }

@@ -123,6 +123,15 @@ export const runs = pgTable(
     // claimed by the tick, or cancelled). One column, no table, because a
     // pending retry is a property of the latest failed attempt.
     retryAt: timestamp("retry_at", { withTimezone: true }),
+    // Phase 17 (D20): the machine-readable outcome used when `status` alone is
+    // not enough. Only 'unknown' is stored today — the click was dispatched,
+    // HRHub did not confirm it, and its own attendance card does not show the
+    // row either, so whether a record now exists is genuinely unknown. It is a
+    // COLUMN rather than a new `status` value on purpose: the five-value
+    // lifecycle enum and the partial unique index `runs_one_active_per_user`
+    // stay exactly as they are, and 'unknown' is still a `failure` for every
+    // existing query. NULL means "nothing to add beyond the status".
+    outcome: text("outcome", { enum: ["unknown"] }),
     loginMethod: text("login_method"),
     error: text("error"),
     steps: jsonb("steps")

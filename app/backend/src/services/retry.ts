@@ -24,8 +24,9 @@ import { hasPendingRetry, setRetryAt } from "./retry-state";
 // (services/run-lifecycle.ts) next to the other two triggers.
 //
 // Hard constraint, unchanged from phase 14: retry `failure` ONLY, never
-// `skipped`. `isAlreadyClockedForToday` fails safe by skipping on doubt, so
-// retrying a skip turns one uncertain read into repeated clock attempts — the
+// `skipped`. A `skipped` run means HRHub already showed the action was done
+// (e.g. already clocked in) or was not safe to attempt (e.g. no clock-in
+// today) — replaying it would clock an action HRHub said to leave alone, the
 // exact double-clock `runs_one_active_per_user` exists to prevent.
 
 export type RetryPolicy = {

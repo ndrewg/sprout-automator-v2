@@ -27,7 +27,16 @@ export default defineConfig({
       {
         test: {
           name: "unit",
-          include: ["test/lib/**/*.test.ts", "test/services/**/*.test.ts"],
+          include: [
+            "test/lib/**/*.test.ts",
+            "test/services/**/*.test.ts",
+            // Phase 17: the orchestration above the HRHub portal seam is pure
+            // code with a scripted fake adapter, so its safety rules (read the
+            // card first, an OUT needs an IN, unconfirmed means unknown) are
+            // unit-testable. test/automation/fake-portal.ts is the fake; only
+            // `*.test.ts` files are collected.
+            "test/automation/**/*.test.ts",
+          ],
         },
       },
       {

@@ -244,8 +244,7 @@ describe("retry on transient failure", () => {
       if (!run) throw new Error("expected an attempt-0 run");
 
       vi.mocked(runAutomation).mockResolvedValue({
-        success: true,
-        skipped: true,
+        outcome: "skipped",
         loginMethod: "saved_session",
         skipReason: "already clocked in",
       });
@@ -363,8 +362,7 @@ describe("retry on transient failure", () => {
       expect(manual.ok).toBe(true);
       if (!manual.ok) return;
       vi.mocked(runAutomation).mockResolvedValue({
-        success: true,
-        skipped: false,
+        outcome: "success",
         loginMethod: "saved_session",
       });
       await executeQueuedRun(manual.run.id);

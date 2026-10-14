@@ -82,8 +82,7 @@ describe("retry wiring: finishRun -> scheduleRetryOnFailure", () => {
     });
     const runId = await failedRunFor(user.id);
     vi.mocked(runAutomation).mockResolvedValue({
-      success: true,
-      skipped: true,
+      outcome: "skipped",
       loginMethod: "saved_session",
       skipReason: "already clocked in",
     });
@@ -101,8 +100,7 @@ describe("retry wiring: finishRun -> scheduleRetryOnFailure", () => {
     });
     const runId = await failedRunFor(user.id);
     vi.mocked(runAutomation).mockResolvedValue({
-      success: true,
-      skipped: false,
+      outcome: "success",
       loginMethod: "saved_session",
     });
     await executeQueuedRun(runId);

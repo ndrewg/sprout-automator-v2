@@ -11,6 +11,7 @@ import {
 } from "../automation/otp-bridge";
 import { createOtpAcquirer } from "./otp-acquisition";
 import { errorSummary } from "../lib/text";
+import { UNKNOWN_OUTCOME } from "../lib/run-outcome";
 import { finishRun } from "./run-lifecycle";
 
 // The run EXECUTOR and the run history queries. Creation and every terminal
@@ -87,14 +88,16 @@ export async function executeQueuedRun(runId: string): Promise<void> {
       waitForOtpCode,
       log,
     });
-    const status = result.success
-      ? result.skipped
-        ? "skipped"
-        : "success"
-      : "failure";
+    // Phase 17: an attempt the app could not confirm is stored as a `failure`
+    // with a machine-readable outcome, NOT as a new status value — the
+    // lifecycle's enum and the partial unique index are untouched. The
+    // lifecycle reads `outcome` to decide the retry: "unknown" is never retried.
+    const status: "success" | "skipped" | "failure" =
+      result.outcome === UNKNOWN_OUTCOME ? "failure" : result.outcome;
     await finishRun({
       run,
       status,
+      outcome: result.outcome === UNKNOWN_OUTCOME ? UNKNOWN_OUTCOME : null,
       loginMethod: result.loginMethod,
       error: result.error ?? null,
       skipReason: result.skipReason ?? null,

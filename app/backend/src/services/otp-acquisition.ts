@@ -15,6 +15,11 @@ export type OtpAcquirerDeps = {
   waitForOtp: (runId: string) => Promise<string>;
   cancelWait: (runId: string) => void;
   pollForOtp: (creds: ImapCreds, options?: PollForOtpOptions) => Promise<string>;
+  /**
+   * The clock, injected (never `Date.now()` inline) so the request instant this
+   * run anchors its IMAP search to is testable.
+   */
+  now: () => Date;
 };
 
 export type OtpAcquirer = {
@@ -28,6 +33,7 @@ const defaultDeps: OtpAcquirerDeps = {
   waitForOtp,
   cancelWait,
   pollForOtp,
+  now: () => new Date(),
 };
 
 export function createOtpAcquirer(
@@ -37,7 +43,17 @@ export function createOtpAcquirer(
 ): OtpAcquirer {
   const submittedCodes = new Set<string>();
 
+  // The instant this run asked HRHub for an OTP (phase 17 § 17C). Recorded on
+  // the FIRST acquisition of the run and reused for every later attempt: the
+  // purpose is to discard mail that predates the request, and a retry within the
+  // same run is re-submitting against the same login, so a later anchor could
+  // only narrow the window onto mail this run is entitled to use. The 60 s
+  // allowance in lib/imap-otp.ts absorbs the gap between the login submitting
+  // and the OTP page being reached.
+  let requestedAt: Date | null = null;
+
   const waitForOtpCode = async (): Promise<string> => {
+    requestedAt ??= deps.now();
     // Fresh controller per attempt (locked D8/D9 keeps the Promise.any race,
     // but the loser must only ever stop THIS attempt's poller, not the whole
     // run's). Kept inside the acquisition so a retry races a live poller.
@@ -49,6 +65,7 @@ export function createOtpAcquirer(
         const imap = deps.pollForOtp(imapCreds, {
           signal: controller.signal,
           excludeCodes: submittedCodes,
+          requestedAfter: requestedAt,
         });
         code = await Promise.any([manual, imap]);
       } else {

@@ -6,6 +6,7 @@ import { pingHeartbeat } from "../lib/heartbeat";
 import { manilaDateString, decideDay, type DayDecision, type WorkdayReasonCode } from "./workday";
 import { isUniqueViolation } from "../lib/pg-errors";
 import { errorSummary, stripAnsi } from "../lib/text";
+import { shouldScheduleRetry, type StoredOutcome } from "../lib/run-outcome";
 import { onTick } from "../lib/wall-clock-tick";
 import type { ClockAction } from "../automation/clock";
 import { notifyHeadsUp, notifyRunFinished } from "./notifications";
@@ -158,6 +159,14 @@ export async function startRun(
 export type FinishRunParams = {
   run: Run;
   status: RunOutcome;
+  /**
+   * The machine-readable outcome, when the status alone is not enough
+   * (phase 17, D20). Only "unknown" exists today: the click was dispatched,
+   * HRHub did not confirm it and its own attendance card does not show the row
+   * either. Stored as `status = 'failure'` + `outcome = 'unknown'`, and the one
+   * thing that changes the retry decision.
+   */
+  outcome?: StoredOutcome | null;
   loginMethod?: string | null;
   error?: string | null;
   /** For the notifier only — never persisted (runs has no such column). */
@@ -189,6 +198,12 @@ export type FinishRunResult = {
  * It fires on success, on a deliberate skip (already clocked) and on a
  * terminal failure — never while a retry is still queued, because that slot has
  * not reached its outcome yet.
+ *
+ * "Unknown" (phase 17, D20): a failure that could not confirm whether the click
+ * landed carries `outcome: "unknown"`, which suppresses the retry entirely.
+ * It is still notified — the retry path's replacement rule does not apply
+ * because there is no retry message to replace it with — and it still pings,
+ * because the slot HAS reached its outcome.
  */
 export async function finishRun(
   params: FinishRunParams,
@@ -201,6 +216,7 @@ export async function finishRun(
 
   const patch: Partial<typeof runs.$inferInsert> = {
     status: params.status,
+    outcome: params.outcome ?? null,
     error,
     finishedAt: new Date(),
   };
@@ -212,12 +228,19 @@ export async function finishRun(
     .where(eq(runs.id, params.run.id))
     .returning();
   if (!updated) throw new Error("finishRun: update returned no row");
-  logger.info({ runId: updated.id, status: params.status }, "run finished");
+  logger.info(
+    { runId: updated.id, status: params.status, outcome: updated.outcome },
+    "run finished",
+  );
 
-  const retry =
-    params.status === "failure"
-      ? await scheduleRetryOnFailure(updated, opts.now ?? null)
-      : "none";
+  // The retry decision, tightened by phase 17: `failure` only, never a skip,
+  // and NEVER an `unknown` failure — a retry against a day whose state we could
+  // not confirm is a second clock, which is the outcome this whole phase exists
+  // to prevent. The rule lives in lib/run-outcome.ts so it is testable without
+  // a database.
+  const retry = shouldScheduleRetry(params.status, params.outcome ?? null)
+    ? await scheduleRetryOnFailure(updated, opts.now ?? null)
+    : "none";
 
   const notified = params.status !== "failure" || retry === "none";
   if (notified) {

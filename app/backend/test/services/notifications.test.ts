@@ -94,6 +94,7 @@ function makeRun(overrides: Partial<Run> = {}): Run {
     status: "success",
     attempt: 0,
     retryAt: null,
+    outcome: null,
     loginMethod: null,
     error: null,
     steps: [],
@@ -270,6 +271,84 @@ describe("renderRunFinishedMessage — the four shapes", () => {
     expect(html.length).toBeLessThan(400);
     expect(html).not.toContain("boom ".repeat(100));
     expect(html.endsWith("…")).toBe(true);
+  });
+});
+
+describe("renderRunFinishedMessage — phase 17 outcomes", () => {
+  const date = new Date("2026-08-10T05:31:00+08:00");
+  const UNKNOWN_DETAIL =
+    "HRHub didn't confirm and the attendance card doesn't show it. " +
+    "Check HRHub before clocking manually.";
+
+  it("an UNKNOWN outcome is its own message, not the generic ⚠️ failure", () => {
+    const html = renderRunFinishedMessage({
+      action: "in",
+      status: "failure",
+      outcome: "unknown",
+      error: UNKNOWN_DETAIL,
+      skipReason: null,
+      date,
+    });
+    expect(html).toBe(
+      "❓ <b>Clock-in state unknown</b>\n05:31 · Mon 10 Aug\n" + UNKNOWN_DETAIL,
+    );
+    // The whole point of the message: check HRHub BEFORE clocking manually.
+    expect(html).toContain("before clocking manually");
+    expect(html).not.toContain("Clock-in failed");
+  });
+
+  it("names the clock-out when it is the clock-out that is unknown", () => {
+    const html = renderRunFinishedMessage({
+      action: "out",
+      status: "failure",
+      outcome: "unknown",
+      error: UNKNOWN_DETAIL,
+      skipReason: null,
+      date,
+    });
+    expect(html).toContain("Clock-out state unknown");
+    expect(html).not.toContain("Clock-in");
+  });
+
+  it("an ordinary failure is still the ⚠️ shape (outcome null)", () => {
+    const html = renderRunFinishedMessage({
+      action: "in",
+      status: "failure",
+      outcome: null,
+      error: "Login failed — could not reach dashboard.",
+      skipReason: null,
+      date,
+    });
+    expect(html.startsWith("⚠️ <b>Clock-in failed</b>")).toBe(true);
+  });
+
+  it("a clock-out abandoned for want of a clock-in ALERTS rather than reassures", () => {
+    const html = renderRunFinishedMessage({
+      action: "out",
+      status: "skipped",
+      outcome: null,
+      error: null,
+      skipReason: "no clock-in found today, not clocking out",
+      date,
+    });
+    expect(html).toBe(
+      "⚠️ <b>Clock-out skipped — no clock-in today</b>\n05:31 · Mon 10 Aug\n" +
+        "no clock-in found today, not clocking out\n" +
+        "Nothing was clocked out. Clock in at HRHub if you are working.",
+    );
+    expect(html.startsWith("ℹ️")).toBe(false);
+  });
+
+  it("does not mistake a benign 'already clocked' skip for the no-clock-in alert", () => {
+    const html = renderRunFinishedMessage({
+      action: "out",
+      status: "skipped",
+      outcome: null,
+      error: null,
+      skipReason: 'Already clocked OUT today (matched row "x") — skipping.',
+      date,
+    });
+    expect(html.startsWith("ℹ️")).toBe(true);
   });
 });
 

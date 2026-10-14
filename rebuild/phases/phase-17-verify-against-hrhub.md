@@ -98,3 +98,34 @@ git grep -n "from \"playwright\"\|from 'playwright'" -- app/backend/src | grep -
 | 5 | Card snapshot fixtures | Committed with names and IDs redacted; the parser reads them |
 
 Commit per the loop in `AGENTS.md`. Tag `phase-17-complete` when the table is filled in.
+
+---
+
+> ⚠️ **As-built (2026-10-14):** decisions and divergences from the implemented phase.
+>
+> **1. Module layout.**
+> - **`automation/portal-seam.ts`** — the narrow `HRHubPortal` interface (`ensureLoggedIn`, `readTodayAttendance`, `pressClockAction`, `takeScreenshot`, `close`), plus `ClockAction` (moved here; `clock.ts` re-exports it so every existing importer is unchanged) and `ClockPressResult` (`confirmed` | `error_dialog` | `no_dialog`).
+> - **`automation/playwright-portal.ts`** — the Playwright adapter. Holds the browser, the storage-state file, the login/OTP flow (including the stale-session recovery), the card locator and the clock selectors. `playwright` is still imported only under `src/automation/`.
+> - **`automation/clock-attempt.ts`** — the orchestration: read → decide → press → read again → decide. Pure of Playwright.
+> - **`automation/runAutomation.ts`** — now a ten-line wrapper that builds the adapter and delegates; it keeps its name because `services/runs.ts` and six integration tests are written against it.
+> - **`automation/attendance-card.ts`** — the pure card parser (`parseAttendanceCard`, `parseRowDate`).
+> - **`lib/run-outcome.ts`** — the outcome vocabulary, `shouldScheduleRetry`, `unknownOutcomeDetail`, `NO_CLOCK_IN_SKIP_REASON`.
+>
+> **2. `unknown` is stored as `status='failure'` + `runs.outcome='unknown'`** (migration **`0012_run_outcome.sql`**, one `ALTER TABLE ... ADD COLUMN "outcome" text`, renamed from the generated `0012_aromatic_liz_osborn.sql` per the project's naming convention). The status enum and the partial unique index are untouched, as the phase preferred. `finishRun` gained an optional `outcome` and asks `shouldScheduleRetry(status, outcome)` — so the retry is skipped by the same code path that records it, and `notified`/`pinged` still treat it as a reached outcome (the alert fires; the heartbeat pings). **D20 updated** with this decision. `outcome` is NULL for every other terminal status.
+>
+> **3. `clock.ts` was edited more than "move the code".** The already-clocked guard (`isAlreadyClockedForToday`) is REMOVED — its three date formats moved into the parser, its fail-safe branching into the orchestration — and `performClockAction`'s result is now the discriminated `ClockPressResult` instead of `{success, message?, error?}`, because § 17B needs "explicit error dialog" told apart from "no dialog at all". **Every selector, wait, screenshot and log line is byte-identical to the playbook**; only the three `return`s changed. The old string sentinel ("Clock action completed but no confirmation dialog appeared") is gone with it.
+>
+> **4. What the live markup settled (and one reading the phase left open).** The operator's saved dashboard snapshot (`view-source…EmployeeDashboard.aspx.html`, untracked, **must not be committed**) was read as text:
+> - the card is `div.widget` > `.widget-title` (title + the `clock-in-out-dropdown`) > `.widget-content` > `.widget-body`, whose rows are the last **4** attendance logs (`GetLastLogs`, `{logCount: 4}`);
+> - each row is `date \t IN|OUT \t time` on ONE line (the guard's `split("\n")` is therefore correct), and the date is `moment(LogTime).format('MM/DD/YY')` — so the three known formats are right and `MM/DD/YY` is the one that matters;
+> - the success dialog is title `Time Entry Confirmation` / `Clocking Status Update`; the **error** dialog uses the SAME class with title `Clock In`/`Clock Out` and the server text in the body — which is exactly how `performClockAction` separates the two;
+> - the card's empty state is a `No Current Logs` div, and `myAttendanceLogs().length == 0` also renders it **when the AJAX behind it failed**. The phase's literal rule ("no row's date parses … unreadable") therefore decides this case: an empty/unreadable card is `skipped: could not read attendance`, never "not clocked today". That is the fail-safe direction (playbook invariant 5, AGENTS.md rule 10) and it is the only reading that cannot double-clock, but it means **a brand-new account with no attendance history will not be auto-clocked** — the alert says so. Worth watching on the first live run.
+>
+> **5. The card-parser fixtures are DELAYED, and no fixture file was added.** The parser is tested against **synthetic card text built in the test** (`test/automation/attendance-card.test.ts`), covering the three known formats plus a day-first unknown one. The phase's "(fixtures)" bullet stays open: **the operator must supply a redacted real card snapshot** under `test/fixtures/`, with a test that parses it, so HRHub's own markup drift is caught as well as its date format.
+>
+> **6. Unit tests live in `test/automation/`** — a new unit-project include entry in `vitest.config.ts` (the seam's tests mirror `src/automation/`). `test/automation/fake-portal.ts` is the second adapter; it is not a `*.test.ts` file, so nothing collects it as a suite.
+>
+> **7. § 17C implementation detail.** The "OTP request instant" is captured in `services/otp-acquisition.ts` on the **first** `waitForOtpCode()` call of the run (i.e. when the login flow reaches the OTP page and asks for a code), via an injected `now` — never `Date.now()` inline — and reused for every later attempt of the same run. `fetchLatestOtp` takes an options object now (`{lookbackSeconds, excludeCodes, requestedAfter}`) rather than positional arguments.
+>
+> **8. Not on the card, not in this phase:** exposing `outcome` through `GET /runs` (the route whitelists fields and the UI would need a badge to make it useful) — the alert is the user-facing signal. Moved to `BACKLOG.md` only if the operator wants it.
+

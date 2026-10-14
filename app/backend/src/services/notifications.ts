@@ -16,6 +16,10 @@ import { recordAudit } from "../lib/audit";
 import { logger } from "../lib/logger";
 import { stripAnsi, truncateText } from "../lib/text";
 import {
+  NO_CLOCK_IN_SKIP_REASON,
+  UNKNOWN_OUTCOME,
+} from "../lib/run-outcome";
+import {
   escapeHtml,
   sendTelegramMessage,
   type TelegramSendResult,
@@ -91,11 +95,13 @@ const TOGGLE_FOR_KIND: Record<
 export function renderRunFinishedMessage(params: {
   action: ClockAction;
   status: "success" | "skipped" | "failure";
+  /** `runs.outcome` — only "unknown" exists today (phase 17). */
+  outcome?: string | null;
   error: string | null;
   skipReason: string | null;
   date: Date;
 }): string {
-  const { action, status, error, skipReason, date } = params;
+  const { action, status, outcome, error, skipReason, date } = params;
   const label = action === "in" ? "Clock-in" : "Clock-out";
   const time = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Asia/Manila",
@@ -109,6 +115,17 @@ export function renderRunFinishedMessage(params: {
     return `✅ <b>${doneLabel}</b>\n${time} · ${day}`;
   }
 
+  // Phase 17: the app clicked, HRHub did not confirm, and its own attendance
+  // card does not show the row either. This is the one message in the system
+  // that asks the user to check HRHub *before* acting, because acting (clocking
+  // in manually) is what would produce the double record.
+  if (status === "failure" && outcome === UNKNOWN_OUTCOME) {
+    const body = error
+      ? `\n${escapeHtml(truncateText(stripAnsi(error)))}`
+      : "";
+    return `❓ <b>${label} state unknown</b>\n${time} · ${day}${body}`;
+  }
+
   if (status === "failure") {
     const reason = error ?? skipReason;
     const body = reason
@@ -120,6 +137,18 @@ export function renderRunFinishedMessage(params: {
   // The reason is the run's skipReason — never a lifecycle step, so the
   // fail-safe branches (could not locate/verify) stay distinguishable.
   const reason = skipReason ? stripAnsi(skipReason) : null;
+
+  // Phase 17: a clock-out abandoned because today has no clock-in. It is a
+  // SKIP (nothing was attempted), but it is not reassurance — the user is not
+  // clocked in, and the morning's clock-in is the thing that silently failed.
+  if (reason && reason.includes(NO_CLOCK_IN_SKIP_REASON)) {
+    return (
+      `⚠️ <b>${label} skipped — no clock-in today</b>\n${time} · ${day}\n` +
+      `${escapeHtml(truncateText(reason))}\n` +
+      `Nothing was clocked out. Clock in at HRHub if you are working.`
+    );
+  }
+
   if (reason && UNSAFE_SKIP_RE.test(reason)) {
     return (
       `⚠️ <b>${label} skipped — could not verify</b>\n${time} · ${day}\n` +
@@ -311,6 +340,7 @@ export async function notifyRunFinished(params: {
     const html = renderRunFinishedMessage({
       action: run.action,
       status,
+      outcome: run.outcome,
       error,
       skipReason,
       date: run.startedAt,

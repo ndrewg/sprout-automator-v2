@@ -35,7 +35,12 @@ function makeFakeDeps(): {
   const pollForOtp = vi.fn<OtpAcquirerDeps["pollForOtp"]>(
     async () => "12345",
   );
-  return { deps: { waitForOtp, cancelWait, pollForOtp }, waitForOtp, cancelWait, pollForOtp };
+  return {
+    deps: { waitForOtp, cancelWait, pollForOtp, now: () => new Date("2026-08-10T08:15:00Z") },
+    waitForOtp,
+    cancelWait,
+    pollForOtp,
+  };
 }
 
 describe("createOtpAcquirer", () => {
@@ -100,6 +105,7 @@ describe("createOtpAcquirer", () => {
       waitForOtp: () => new Promise<string>(() => {}),
       cancelWait: () => {},
       pollForOtp,
+      now: () => new Date("2026-08-10T08:15:00Z"),
     });
 
     expect(await waitForOtpCode()).toBe("12345");
@@ -124,12 +130,37 @@ describe("createOtpAcquirer", () => {
       waitForOtp,
       cancelWait: () => {},
       pollForOtp: () => new Promise<string>(() => {}),
+      now: () => new Date("2026-08-10T08:15:00Z"),
     });
 
     const pending = waitForOtpCode();
     resolveManual("99999");
     expect(await pending).toBe("99999");
     expect(submittedCodes.has("99999")).toBe(true);
+  });
+
+  it("anchors every IMAP poll to the instant the run first asked for an OTP (17C)", async () => {
+    // The run's request instant is captured once and reused, so a retry within
+    // the same run cannot widen the window onto mail that predates the request.
+    const request = new Date("2026-08-10T08:15:00Z");
+    const seen: Array<Date | null | undefined> = [];
+    const pollForOtp = vi.fn<OtpAcquirerDeps["pollForOtp"]>(
+      async (_creds, options) => {
+        seen.push(options?.requestedAfter);
+        return "12345";
+      },
+    );
+    const { waitForOtpCode } = createOtpAcquirer("run-1", IMAP_CREDS, {
+      waitForOtp: () => new Promise<string>(() => {}),
+      cancelWait: () => {},
+      pollForOtp,
+      now: () => request,
+    });
+
+    await waitForOtpCode();
+    await waitForOtpCode();
+
+    expect(seen).toEqual([request, request]);
   });
 
   it("does not start an IMAP poller when no gmail creds exist (manual bridge only)", async () => {
@@ -147,6 +178,7 @@ describe("createOtpAcquirer", () => {
       waitForOtp,
       cancelWait: () => {},
       pollForOtp,
+      now: () => new Date("2026-08-10T08:15:00Z"),
     });
 
     const pending = waitForOtpCode();
