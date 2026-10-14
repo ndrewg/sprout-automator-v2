@@ -26,6 +26,7 @@ import {
   schedulerLastFireAt,
 } from "./services/scheduler";
 import { wallClockLastTickAt } from "./lib/wall-clock-tick";
+import { heartbeatConfigured } from "./lib/heartbeat";
 
 // Everything that builds the Express app: middleware order, routers, /health,
 // the static SPA, the SPA catch-all, and the global error handler. Split out of
@@ -120,6 +121,11 @@ app.use("/notifications", notificationsRouter);
 //     and reporting that as degraded would make an uptime monitor page someone
 //     about a host that was never meant to clock anybody.
 //   - queue: the run-queue depth, so a wedged queue is visible.
+//   - heartbeat (18D): whether an OUTSIDE monitor is configured — `configured`
+//     is a boolean and the URL itself is never emitted (see lib/heartbeat.ts).
+//     A false here on the scheduled host means nothing will notice a host that
+//     is down; it is reported, not treated as degraded, because the heartbeat
+//     is optional on every host and 18B is what turns it on.
 app.get("/health", async (_req: Request, res: Response) => {
   let dbStatus: "ok" | "down" = "down";
   let enabledInDb = 0;
@@ -160,6 +166,12 @@ app.get("/health", async (_req: Request, res: Response) => {
       // The shared wall-clock tick that fires every scheduled job. NULL or
       // stale (older than a few ticks) means nothing time-based will run.
       lastTickAt: wallClockLastTickAt(),
+    },
+    // The outside dead-man's-switch (18D): a BOOLEAN only. The ping URL is
+    // never emitted — anyone holding it can silence the alarm, and this
+    // endpoint is unauthenticated (rule 4).
+    heartbeat: {
+      configured: heartbeatConfigured(),
     },
     queue: { active, waiting, cap },
     timestamp: new Date().toISOString(),

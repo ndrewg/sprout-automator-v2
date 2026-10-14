@@ -30,6 +30,24 @@ function heartbeatUrl(): string | undefined {
 }
 
 /**
+ * Whether a heartbeat URL is configured (phase 18D) — reported by `/health` as
+ * `heartbeat.configured`.
+ *
+ * A BOOLEAN, never the URL. `/health` is unauthenticated and unthrottled (an
+ * uptime monitor must reach it with no session), so the URL must not appear in
+ * its body: anyone holding a dead-man's-switch ping URL can keep the alarm quiet
+ * by pinging it, and a healthchecks.io URL can carry its own management token.
+ * This is the same rule that keeps `GET /credentials` to `*Set` booleans and
+ * `GET /notifications` to `telegramTokenSet` (AGENTS.md rule 4).
+ *
+ * Reads the same lazy env-override-then-config value as the ping itself, so the
+ * reported state can never disagree with whether a ping would actually be sent.
+ */
+export function heartbeatConfigured(): boolean {
+  return heartbeatUrl() !== undefined;
+}
+
+/**
  * Ping the heartbeat. Returns immediately; the request is fire-and-forget. No
  * identifying data. Never throws.
  */

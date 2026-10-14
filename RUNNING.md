@@ -2,11 +2,14 @@
 
 This guide is for running the app on a machine (e.g. a laptop) and leaving it
 up so the scheduler auto-clocks Mon–Fri. It uses the **Docker production build**
-(the whole app in one container, in-process cron scheduler, bundled UI served by
-Express). For day-to-day *development* use the dev loop instead (see the end).
+(the whole app in one container, the in-process wall-clock scheduler, bundled UI
+served by Express). For day-to-day *development* use the dev loop instead (see
+the end).
 
-> Full HTTPS/reverse-proxy deployment (Caddy) is Phase 5 → `DEPLOY.md` (not yet
-> written). This guide covers a plain `http://localhost:3000` run on your own box.
+> Full HTTPS/reverse-proxy deployment (Caddy) is Phase 5 → `DEPLOY.md`. This
+> guide covers a plain `http://localhost:3000` run on your own box;
+> `DEPLOY.md` § *Windows laptop host* covers the scheduled Windows machine
+> itself (phase 18).
 
 ---
 
@@ -113,19 +116,77 @@ progress in **Run history**.
 
 ## Leaving it running all week — read this
 
-The scheduler is an in-process cron (`node-cron`, timezone **Asia/Manila**, Mon–Fri).
-For it to fire, the process must be awake at the scheduled time:
+### For it to fire
 
-- **Stop the laptop from sleeping/hibernating.** `node-cron` only runs while the
-  process is alive and does **not** back-fill missed runs. If the laptop is asleep
-  at 5:30am, that clock-in is missed (you can still "Clock in now" manually).
-  Set power to *never sleep* while plugged in, and *"do nothing" on lid close*.
-- **Keep it plugged in** and on a stable network.
-- **Start Docker Desktop on login** (Docker Desktop → Settings → General →
-  "Start Docker Desktop when you sign in"). Containers auto-restart, but only if
-  Docker itself is running.
-- The **already-clocked guard** means a duplicate run for the same action/day
-  ends as `skipped` — safe. But there's no auto-catch-up for a missed slot.
+The scheduler is **in-process and timezone-aware** (`Asia/Manila`, Mon–Fri). It
+is no longer `node-cron`: a single shared **wall-clock tick** (every 15 s)
+compares the real time against what is due and fires the slots, retries and the
+missed-run sweep. Nothing waits on a long timer, so a slow
+container clock can only delay a job by up to one tick. (The old node-cron
+design armed one long `setTimeout` per slot; the Docker VM's clock drifted
+minutes a day and dropped a clock-in ~once a week — see
+`rebuild/02-DECISIONS-AND-ARCHITECTURE.md` **D8**.)
+
+- **Only the scheduled machine clocks anyone.** Scheduling is opt-in per
+  process: `SCHEDULER_ENABLED=true` in the **laptop's** `.env`. It defaults to
+  **`false`**, and while it is false this process registers no daily slots, no
+  retries, no missed-run sweep — manual runs and the whole
+  UI still work, which is exactly what makes a missing line look like nothing at
+  all. Leave it unset on every other machine (the work PC included):
+  `GET /health` reports `scheduler.enabled`, so you can always tell which host is
+  which.
+- **Stop the laptop from sleeping/hibernating.** The tick only runs while the
+  process is alive and does **not** back-fill a slot it slept through — asleep
+  at 05:30 means that clock-in did not happen (you can still "Clock in now" by
+  hand). Set power to *never sleep* while plugged in, *"do nothing"* on lid
+  close, and **keep it plugged in** on a stable network. Phase 18 § 18A has the
+  exact Windows settings.
+- **Start Docker Desktop on login** (Settings → General → **"Start Docker Desktop
+  when you sign in to your computer"**). Containers auto-restart, but only if
+  Docker itself is running — and Docker Desktop **cannot** start before an
+  interactive login, so a Windows Update reboot that leaves the machine at the
+  login screen takes the stack down with it. That is the case the outside
+  monitor below exists to catch; phase 18 § 18A sets Windows Update *active
+  hours* around the clock-in windows.
+- **A failed run retries, a missing one alerts.** The **already-clocked guard**
+  means a duplicate run for the same action/day ends as `skipped` — safe. A run
+  that *fails* is retried on its own, bounded by `RETRY_MAX_ATTEMPTS` and the
+  per-action wall-clock cutoffs. A slot that never ran at all raises a
+  **missed-run** alert. Neither is a substitute for the host being awake.
+
+### Pausing: use the calendar, not the power switch
+
+Powering the laptop off is indistinguishable from the laptop being broken — the
+outside monitor below cannot tell the difference and will page you. To take time
+off:
+
+- **Skip individual days** in the **Schedule** panel's calendar (phase 16): mark
+  a day *Skip*, and today's pending retry is cancelled with it.
+- **Or set a pause range** (`paused_from` / `paused_until`) for leave. It
+  **expires on its own** — a date range, never a boolean, so a forgotten pause
+  cannot silently stop you clocking in for a month (D18).
+- Every deliberate skip (a skip day, a pause window, a holiday the app skips)
+  sends one notice per would-be clock day — deliberate, not noise. The
+  **skipped** toggle in the Notifications panel is the mute.
+
+### Something outside the laptop watches it
+
+Nothing inside the stack can report that the stack is down, so the alarm has to
+live outside it. The app pings an **outside dead-man's switch** when a scheduled
+slot reaches an *outcome* (success, a deliberate skip, or a give-up — not while a
+retry is still queued). Point `HEARTBEAT_URL` in the laptop's `.env` at your
+monitor's ping URL — healthchecks.io by default, see `DEPLOY.md` § *Windows
+laptop host* and phase 18 § 18B.
+
+- **Configure the check as a *Cron* schedule**, not an interval — cron
+  expression `15 5,16 * * 1-5`, *Server's Time Zone* `Asia/Manila`, *Grace Time*
+  45 minutes (healthchecks.io's field names; every equivalent monitor takes the
+  same three). This host is deliberately off over the weekend, so an interval
+  check calls every weekend an outage, and an alarm that cries wolf is one you
+  mute.
+- **`/health` reports `heartbeat.configured`** (a boolean — the ping URL itself
+  is never exposed, on any endpoint). Set `HEARTBEAT_URL` and restart the backend
+  outside 05:15–05:45 and 16:00–16:30, then confirm it flips to `true`.
 
 ### Checking on it
 ```bash

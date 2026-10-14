@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { pingHeartbeat } from "../../src/lib/heartbeat";
+import { heartbeatConfigured, pingHeartbeat } from "../../src/lib/heartbeat";
 
 // 12D — dead-man's-switch heartbeat. Unit tests for the fire-and-forget ping:
 // off when unset, exactly one request when set, no identifying data in the
 // request, and a rejecting/hanging endpoint never throws.
+// 18D — and `heartbeatConfigured()`, the boolean /health reports: it must track
+// whether a ping WOULD be sent, and must never be the URL itself.
 
 describe("pingHeartbeat", () => {
   const fetchMock = vi.fn();
@@ -69,5 +71,59 @@ describe("pingHeartbeat", () => {
     );
     expect(() => pingHeartbeat()).not.toThrow();
     await new Promise((r) => setTimeout(r, 30));
+  });
+});
+
+// 18D — what /health reports. The endpoint is unauthenticated, so this must be
+// a boolean and never the URL.
+describe("heartbeatConfigured", () => {
+  const fetchMock = vi.fn();
+  // A URL that is recognisable enough that leaking ANY part of it is visible.
+  const CONFIGURED_URL = "https://hc-ping.com/18d-secret-uuid-heartbeat";
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    fetchMock.mockResolvedValue(new Response("ok", { status: 200 }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env["HEARTBEAT_URL"];
+  });
+
+  it("is false when HEARTBEAT_URL is unset", () => {
+    delete process.env["HEARTBEAT_URL"];
+    expect(heartbeatConfigured()).toBe(false);
+  });
+
+  it("is true when HEARTBEAT_URL is set", () => {
+    process.env["HEARTBEAT_URL"] = CONFIGURED_URL;
+    expect(heartbeatConfigured()).toBe(true);
+  });
+
+  it("returns a boolean and never the URL or any part of it", () => {
+    process.env["HEARTBEAT_URL"] = CONFIGURED_URL;
+    const value = heartbeatConfigured();
+    expect(typeof value).toBe("boolean");
+    const asText = JSON.stringify({ configured: value });
+    expect(asText).not.toContain("hc-ping.com");
+    expect(asText).not.toContain("18d-secret-uuid-heartbeat");
+    expect(asText).not.toContain(CONFIGURED_URL);
+  });
+
+  it("agrees with whether a ping would actually be sent", () => {
+    // Unset: reported off AND nothing pinged.
+    delete process.env["HEARTBEAT_URL"];
+    expect(heartbeatConfigured()).toBe(false);
+    pingHeartbeat();
+    expect(fetchMock).toHaveBeenCalledTimes(0);
+
+    // Set: reported on AND exactly one ping. A monitor reading `configured`
+    // can therefore never be told "on" while the app stays silent.
+    process.env["HEARTBEAT_URL"] = CONFIGURED_URL;
+    expect(heartbeatConfigured()).toBe(true);
+    pingHeartbeat();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

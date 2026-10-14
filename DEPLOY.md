@@ -9,7 +9,8 @@ behind every choice here; this file is the followable runbook.
 > "backend port is not published" property, and the `pg_dump` → `pg_restore`
 > cycle can all be proven locally (see [Local verification](#local-verification),
 > the same steps the phase-5 gate uses). Only §2 (host hardening) and a
-> **live-domain certificate** genuinely need the VPS.
+> **live-domain certificate** genuinely need the VPS. The **actual** scheduled
+> host is a Windows laptop — see §6.4 and phase 18.
 
 ---
 
@@ -347,6 +348,38 @@ is your only copy** — store it off-host if you can (§6 ⚑), and keep the
 `APP_ENCRYPTION_KEY` **separately** from the dumps (see §9 — a dump without the
 key is unrecoverable, and a dump stored next to the key is a single-file
 compromise of everyone's credentials).
+
+### 6.4 Windows laptop host — the scheduled machine (phase 18)
+
+The **scheduled** deployment is a Windows work laptop, not the VPS this runbook
+was written for. §1–§5 describe the target architecture and are what you follow
+if the app ever **moves to an always-on box**; nothing in the code is
+laptop-specific — the whole deployment is `docker-compose.yml` plus the root
+`.env`, deliberately, so that move is a runbook step rather than a port (D12).
+**Hosting is undecided:** the laptop stays, made as reliable as it can be, until
+one of D12's move triggers holds — a second user depends on it, the host causes
+more than one missed day a month, or phase 19's tunnel goes live.
+
+The host work itself is `[manual]` and operator-led. **Follow it there — don't
+re-derive it here:** `rebuild/phases/phase-18-host-and-outside-alerting.md`.
+
+| Section | What it covers |
+|---|---|
+| **§ 18A** — keep the machine able to run | No sleep while plugged in and lid-close set to *do nothing*; Docker Desktop starting on login via Settings → General → *"Start Docker Desktop when you sign in to your computer"* (it **cannot** start before an interactive login — that is the known gap); Windows Update ***active hours*** set to cover 05:00–17:00 via **Settings → Windows Update → Advanced options → Active hours** (restarts are attempted *outside* active hours, and modern Windows allows a range up to 18 hours — a restart that still lands at the login screen is exactly what § 18B catches); and pausing with the calendar's skip days or a pause window instead of powering the laptop off |
+| **§ 18B** — the outside dead-man's switch | A healthchecks.io check on the **Cron** schedule (not the interval one): a cron expression `15 5,16 * * 1-5`, *Server's Time Zone* `Asia/Manila`, *Grace Time* 45 minutes, alerting by email **and** Telegram or the phone app, plus `HEARTBEAT_URL` in the laptop's `.env` (the key itself is described in §4 above) |
+| **§ 18C** — backups that survive the laptop | The **SproutBackup** scheduled task from §6.3, moved to an hour the laptop is actually awake (midday, **not** 03:00); `BACKUP_DIR` in an off-machine synced folder; `APP_ENCRYPTION_KEY`/`SESSION_SECRET` in a password manager, separate from the dumps (§9); one restore rehearsed and dated; and the stray hand-made `$HOME` dumps retired |
+
+**Two things specific to this host:**
+
+- **`SCHEDULER_ENABLED=true` belongs in the laptop's `.env` and nowhere else.**
+  It defaults to `false`, and while it is unset the process registers nothing
+  time-based — no slots, no retries, no missed-run sweep — so the machine
+  silently stops clocking anyone while the UI still works. Check with
+  `curl --noproxy '*' http://127.0.0.1:3000/health`: `scheduler.enabled: true` on
+  the laptop, `false` on the work PC.
+- **`/health` reports `heartbeat.configured`** — a boolean, never the ping URL
+  (this endpoint is unauthenticated and unthrottled). Use it to confirm § 18B is
+  armed without opening `.env`.
 
 ---
 

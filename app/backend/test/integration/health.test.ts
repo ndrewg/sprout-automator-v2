@@ -16,7 +16,8 @@ import {
 // hardcoded "ok" the old endpoint returned), a failing check responds 503, and
 // a backend that registered zero cron schedules while users have enabled
 // schedules in the DB reports degraded. Also: no emails / no secrets in the
-// body.
+// body. 18D adds `heartbeat.configured` — a boolean that tracks whether an
+// outside dead-man's-switch is armed, never the URL.
 
 describe("GET /health", () => {
   beforeAll(async () => {
@@ -111,6 +112,38 @@ describe("GET /health", () => {
     expect(text).not.toMatch(/leakcheck@example\.com/);
     expect(text).not.toMatch(/supersecret-password-1234/);
     expect(text).not.toMatch(/@example\.com/);
+  });
+
+  // 18D — the outside dead-man's-switch. /health reports only WHETHER a
+  // heartbeat URL is configured, never the URL itself: this endpoint is
+  // unauthenticated and unthrottled (a monitor must reach it with no session),
+  // so a leaked ping URL is a remote off-switch for the very alarm it feeds.
+  it("reports heartbeat.configured true when HEARTBEAT_URL is set — and never the URL", async () => {
+    const url = "https://hc-ping.com/18d-secret-uuid-heartbeat";
+    process.env["HEARTBEAT_URL"] = url;
+    try {
+      const res = await request("/health");
+      expect(res.status).toBe(200);
+      const body = res.body as { heartbeat?: { configured: boolean } };
+      // The whole object: `configured` and nothing else — no key that could
+      // carry the URL.
+      expect(body.heartbeat).toEqual({ configured: true });
+      const text = JSON.stringify(res.body);
+      expect(text).not.toContain(url);
+      expect(text).not.toContain("hc-ping.com");
+      expect(text).not.toContain("18d-secret-uuid-heartbeat");
+      expect(text).not.toContain("HEARTBEAT_URL");
+    } finally {
+      delete process.env["HEARTBEAT_URL"];
+    }
+  });
+
+  it("reports heartbeat.configured false when no heartbeat URL is set", async () => {
+    delete process.env["HEARTBEAT_URL"];
+    const res = await request("/health");
+    expect(res.status).toBe(200);
+    const body = res.body as { heartbeat?: { configured: boolean } };
+    expect(body.heartbeat).toEqual({ configured: false });
   });
 
   // MUST run last: it ends the shared pool. No test may run after this one in
