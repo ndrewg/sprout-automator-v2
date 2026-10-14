@@ -64,6 +64,18 @@ const envSchema = z.object({
       emptyToUndefined,
       z.coerce.number().int().min(1).max(1000).default(30),
     ),
+  // Authenticated-API rate-limit budget: requests per MINUTE per client IP,
+  // shared across /credentials, /schedule, /runs and /notifications (ONE
+  // apiLimiter instance — see middleware/security.ts). Configurable for the
+  // same two reasons as AUTH_RATE_LIMIT: a team behind one NAT sharing an IP,
+  // and the e2e suite — which exercises flows, not limits, and drives several
+  // panels that poll. The budget-is-enforced property is still asserted by the
+  // integration suite, at this default.
+  API_RATE_LIMIT: z
+    .preprocess(
+      emptyToUndefined,
+      z.coerce.number().int().min(1).max(100_000).default(120),
+    ),
   // Number of trusted reverse-proxy hops between the client and Express
   // (app.set("trust proxy", …)). Default 1 — a single reverse proxy, which is
   // today's behaviour. 0 disables proxy trust (the socket address is the

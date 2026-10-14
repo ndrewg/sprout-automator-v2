@@ -141,10 +141,12 @@ describe("missed-run reconciliation sweep", () => {
       .set({ pausedFrom: "2026-08-10", pausedUntil: "2026-08-14" })
       .where(eq(schedules.userId, userId));
     const sent: string[] = [];
+    // NOTE: `isWorkday` is deliberately NOT injected here. Since phase 16A the
+    // sweep asks the Workday gate, and the pause window is the gate's business —
+    // an injected "always a workday" would bypass exactly the check under test.
     const deps = {
       ...defaultSweepDeps,
       now: () => FIXED_NOW,
-      isWorkday: () => true,
       dispatchMissed: async (_uid: string, html: string) => {
         sent.push(html);
         return "sent" as const;

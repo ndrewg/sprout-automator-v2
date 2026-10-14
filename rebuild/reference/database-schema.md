@@ -232,6 +232,7 @@ Added by later phases:
 - Phase 4A.2 (signup gating): `signup_rejected`
 - Phase 6 (notifications): `notification_settings_updated`, `notification_auto_disabled`
 - Phase 4B, if you do the email flows: `email_verified`, `password_reset_requested`, `password_reset_completed`, `account_deleted`
+- Phase 16 (day overrides): `day_override_set`, `day_override_cleared` (event type only — the user's note text is never written to the audit row)
 
 ## Tables added by later phases
 
@@ -239,9 +240,30 @@ Not part of the initial migration — specified in their own phase files, listed
 
 | Table | Phase | Purpose |
 |---|---|---|
-| `notification_settings` | 6 | one row per user: encrypted Telegram bot token, chat ID, four outcome toggles, blocked-count |
+| `notification_settings` | 6 | one row per user: encrypted Telegram bot token, chat ID, four outcome toggles, blocked-count. Phase 16D adds `notify_heads_up` (boolean, default true) |
 | `missed_run_notices` | 6 | idempotency ledger for the reconciliation sweep; **unique on `(user_id, manila_date, action)`** — that index *is* the "notify once" guarantee |
-| `holiday_skip_notices` | 11 | idempotency ledger for the holiday-skip reminder; **unique on `(user_id, manila_date)`** (deliberately omits `action` so the in/out fires of a day produce ONE message) |
-| `gazette_holidays` | 13 | cache of Official Gazette proclamation holidays; **unique on `(manila_date, name)`**, `scope` in (`national`/`regional`/`ambiguous`), only `national` may produce a skip |
+| `holiday_skip_notices` | 11 | idempotency ledger for the "skipping today" message; **unique on `(user_id, manila_date)`** (deliberately omits `action` so the in/out fires of a day produce ONE message). Since phase 16D it carries **every** skip, not only holidays — the name is kept for migration history's sake |
+| `day_overrides` | 16 | the user's per-day exceptions to the Workday gate: **unique on `(user_id, manila_date)`**, `kind` in (`skip`/`work`), optional `note` (≤100). One override per day; setting the other kind replaces it |
+| `heads_up_notices` | 16 | idempotency ledger for the evening heads-up: **unique on `(user_id, manila_date)`**, where the date is the day it was SENT |
+| ~~`gazette_holidays`~~ | ~~13~~ | **REMOVED in phase 16** (migration `0010_drop_gazette_holidays.sql`): the Official Gazette site sits behind a Cloudflare bot challenge and the cache never held a row |
 
 Phase 7 adds `paused_from` / `paused_until` columns to `schedules` (inclusive Manila-day range).
+Phase 14 adds `runs.attempt` and `users.retry_intro_shown`.
+Phase 15 adds `runs.retry_at` (nullable timestamptz).
+Phase 16 adds the `day_overrides` table, drops `gazette_holidays`, and (16D) adds `notification_settings.notify_heads_up`.
+
+## The Workday gate (phase 16) — where the holiday logic lives now
+
+`services/workday.ts` is the ONE module that answers "should user U be clocked
+on Manila day D, and why?". It also owns **every** Manila clock helper
+(`manilaDateString`, `manilaHhmm`, `isWeekend`, `expectedFireTime`,
+`addManilaDays`, `manilaNoon`, `isPausedOn`). Precedence, highest first:
+
+1. the user's own **day override** (`day_overrides`)
+2. the **pause range** (`schedules.paused_from`/`paused_until`)
+3. **weekend**
+4. company **`EXTRA_HOLIDAYS`**
+5. **library** holiday of a skipping type (`public`, `bank`, `optional`)
+
+It never throws: a failed read (overrides, pause, config) degrades to
+library-plus-weekend and logs once per hour.

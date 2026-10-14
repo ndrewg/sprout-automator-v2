@@ -208,6 +208,8 @@ Phase 7's pause window is the workaround, but it requires the user to know in ad
 > **✅ CLOSED (code, 2026-08-24) — phase 13 shipped.** `EXTRA_HOLIDAYS` operator overrides + a nightly Official Gazette advisory cache (additive-only, cache-first, never on the critical path) cover proclamation days and the lunar-date disagreement. The `[manual]` proof (a real proclamation day + the next Eid) waits on the human; the code is committed and gated.
 >
 > **Revised 2026-10-14 — the Gazette layer is being removed (phase 16).** officialgazette.gov.ph sits behind a Cloudflare bot challenge, so the cache never held a row. Proclamation days and the Eid disagreement are now handled by a **per-user day calendar** (skip / work anyway) plus an **evening heads-up** naming the next workday decision: the human is the cross-check, the night before. See the revised D9.
+>
+> **✅ SHIPPED (2026-10-14) — phase 16.** The Gazette layer is gone (migration `0010_drop_gazette_holidays.sql`); `services/workday.ts` owns the decision and every Manila clock helper; the calendar writes one `day_overrides` row per Manila day; and the evening heads-up names the next workday's decision after each clock-out run. The `[manual]` proof waits on the human (mark a real holiday as a workday, receive a real heads-up).
 
 ## 19. No frontend error boundary
 

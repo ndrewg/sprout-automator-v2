@@ -71,7 +71,7 @@ export function RunsPanel() {
   };
 
   return (
-    <Card>
+    <Card data-testid="runs-panel">
       <CardHeader>
         <CardTitle>Run history</CardTitle>
         <CardDescription>Most recent runs (newest first).</CardDescription>

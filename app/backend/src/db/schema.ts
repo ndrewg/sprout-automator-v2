@@ -183,6 +183,10 @@ export const notificationSettings = pgTable("notification_settings", {
   notifyOnFailure: boolean("notify_on_failure").notNull().default(true),
   notifyOnSkipped: boolean("notify_on_skipped").notNull().default(true),
   notifyOnMissed: boolean("notify_on_missed").notNull().default(true),
+  // Phase 16D: the evening heads-up about the next workday's decision. ON by
+  // default — it is the one message that lets a wrong holiday call be caught
+  // before it becomes a false record.
+  notifyHeadsUp: boolean("notify_heads_up").notNull().default(true),
   // Consecutive "chat not found / bot blocked" errors. Persisted so a restart
   // doesn't reset progress toward auto-disable.
   blockedCount: integer("blocked_count").notNull().default(0),
@@ -215,11 +219,13 @@ export const missedRunNotices = pgTable(
   }),
 );
 
-// holiday_skip_notices — idempotency ledger for the "special non-working day"
-// Telegram reminder (phase 11). One row per (user, Manila date) means "we
-// already told them about the optional holiday" — a public holiday stays
-// silent, and the in/out cron fires of the same day must produce ONE message,
-// so the unique key deliberately omits `action`.
+// holiday_skip_notices — idempotency ledger for the "skipping today" Telegram
+// message. One row per (user, Manila date) means "we already told them", and the
+// in/out cron fires of the same day must produce ONE message, so the unique key
+// deliberately omits `action`. Phase 11 introduced it for `optional` holidays;
+// since phase 16D it carries EVERY skip (a library holiday, an operator
+// override, the user's own skip day, a pause window) — the name is kept so the
+// committed migrations stay a single lineage.
 export const holidaySkipNotices = pgTable(
   "holiday_skip_notices",
   {
@@ -238,35 +244,55 @@ export const holidaySkipNotices = pgTable(
   }),
 );
 
-// gazette_holidays — cached Official Gazette proclamation holidays (phase 13).
-// Populated by a nightly fetch; read CACHE-FIRST at decision time (no network
-// when deciding whether to run — a cold or stale cache degrades to the
-// library, never blocks). ADDITIVE-ONLY: a gazette entry may ADD a skip but
-// never cancel one the library or an override already found. `scope` records
-// the detected locality so a regional/ambiguous proclamation NOTIFIES but does
-// not skip (fail-safe: "ask the human", never infer national from absence of a
-// qualifier).
-export const gazetteHolidays = pgTable(
-  "gazette_holidays",
+// day_overrides — per-user exceptions to the Workday gate (phase 16B). ONE row
+// per (user, Manila day): `skip` (leave, an intended miss) or `work` (a holiday
+// the user works anyway). This is what lets holiday data be corrected in BOTH
+// directions, per person, without a restart — the calendar in the Schedule
+// panel writes it, the gate (services/workday.ts) reads it at precedence 1.
+export const dayOverrides = pgTable(
+  "day_overrides",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    // YYYY-MM-DD in Asia/Manila — a Manila calendar day, not an instant.
-    manilaDate: text("manila_date").notNull(),
-    name: text("name").notNull(),
-    // 'national' | 'regional' | 'ambiguous' — how the proclamation's scope was
-    // classified by lib/gazette.ts. Only 'national' may produce a skip.
-    scope: text("scope").notNull(),
-    proclamationNo: text("proclamation_no"),
-    fetchedAt: timestamp("fetched_at", { withTimezone: true })
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // YYYY-MM-DD in Asia/Manila — a Manila calendar day, not an instant. A
+    // `date` column (string mode), so ISO string comparison is correct.
+    manilaDate: date("manila_date").notNull(),
+    kind: text("kind", { enum: ["skip", "work"] }).notNull(),
+    // Free text, ≤100 chars (validated at the API boundary). Never a secret.
+    note: text("note"),
+    createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
   (t) => ({
-    oncePerDateName: uniqueIndex("gazette_holiday_date_name").on(
-      t.manilaDate,
-      t.name,
-    ),
-    dateIdx: index("gazette_holiday_date_idx").on(t.manilaDate),
+    // ONE override per day: setting the other kind REPLACES it.
+    oncePerDay: uniqueIndex("day_overrides_user_date").on(t.userId, t.manilaDate),
+  }),
+);
+
+// heads_up_notices — idempotency ledger for the evening heads-up (phase 16D).
+// One row per (user, Manila date) means "we already told them about tomorrow",
+// so an extra clock-out run, a retry of one, or a container restart cannot
+// duplicate the message. Deliberately a TABLE, not an in-memory flag: the
+// process restarts (D6/D20).
+export const headsUpNotices = pgTable(
+  "heads_up_notices",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // YYYY-MM-DD in Asia/Manila — the day the heads-up was SENT, not the day it
+    // is about. A Manila calendar day, not an instant.
+    manilaDate: text("manila_date").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    oncePerDay: uniqueIndex("heads_up_notice_once").on(t.userId, t.manilaDate),
   }),
 );
 
@@ -305,5 +331,7 @@ export type AuditLogEntry = typeof auditLog.$inferSelect;
 export type NotificationSettings = typeof notificationSettings.$inferSelect;
 export type MissedRunNotice = typeof missedRunNotices.$inferSelect;
 export type HolidaySkipNotice = typeof holidaySkipNotices.$inferSelect;
-export type GazetteHoliday = typeof gazetteHolidays.$inferSelect;
+export type HeadsUpNotice = typeof headsUpNotices.$inferSelect;
+export type DayOverride = typeof dayOverrides.$inferSelect;
+export type NewDayOverride = typeof dayOverrides.$inferInsert;
 export type ResetToken = typeof resetTokens.$inferSelect;

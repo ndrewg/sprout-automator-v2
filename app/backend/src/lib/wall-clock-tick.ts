@@ -3,9 +3,8 @@ import { logger } from "./logger";
 // The process-wide wall-clock tick (2026-10-13, replaces node-cron — see D8).
 //
 // Every time-of-day job in this app (the daily clock-in/out slots, one-shot
-// retries, the missed-run sweep, the nightly Gazette refresh) is driven from
-// ONE short setInterval that compares the wall clock against what is due.
-// Nothing sleeps on a long timer.
+// retries, the missed-run sweep) is driven from ONE short setInterval that
+// compares the wall clock against what is due. Nothing sleeps on a long timer.
 //
 // Why: on the scheduled host (Docker Desktop's WSL2 VM) the monotonic clock
 // that setTimeout/setInterval run on drifts badly against the NTP-synced wall
@@ -86,16 +85,4 @@ export function stopWallClockTick(): void {
   if (timer) clearInterval(timer);
   timer = undefined;
   handlers.clear();
-}
-
-const hhmmFmt = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "Asia/Manila",
-  hour: "2-digit",
-  minute: "2-digit",
-  hour12: false,
-});
-
-/** "HH:mm" in Asia/Manila for an instant. */
-export function manilaHhmm(dt: Date): string {
-  return hhmmFmt.format(dt);
 }

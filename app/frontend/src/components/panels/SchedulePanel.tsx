@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSchedule, useUpdateSchedule } from "@/hooks/useSchedule";
+import { ScheduleCalendar } from "@/components/panels/ScheduleCalendar";
 import {
   Card,
   CardContent,
@@ -18,6 +19,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Separator } from "@/components/ui/separator";
 
 /** dateStr "YYYY-MM-DD" + days, keeping the result in the same format. */
 function addDays(dateStr: string, days: number): string {
@@ -102,7 +104,7 @@ export function SchedulePanel() {
   };
 
   return (
-    <Card>
+    <Card data-testid="schedule-panel">
       <CardHeader>
         <CardTitle>Schedule</CardTitle>
         <CardDescription>
@@ -210,6 +212,22 @@ export function SchedulePanel() {
               {msg ? (
                 <span className="text-sm text-muted-foreground">{msg}</span>
               ) : null}
+            </div>
+
+            {/* Phase 16C: the day calendar. It reads the Workday gate's answers
+                from the server and can flip any upcoming day — skip a workday,
+                work a holiday, or clear the override. The pause inputs above
+                stay; this DISPLAYS pause ranges, it does not replace them. */}
+            <Separator />
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1">
+                <span className="font-medium">Calendar</span>
+                <span className="text-xs text-muted-foreground">
+                  What the automation will do each day. Select a day to change
+                  it.
+                </span>
+              </div>
+              {data ? <ScheduleCalendar today={data.today.date} /> : null}
             </div>
           </>
         )}

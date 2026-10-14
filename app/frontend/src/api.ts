@@ -28,6 +28,31 @@ export type CredentialsView = {
   updatedAt: string | null;
 };
 
+export type WorkdayReason = {
+  code:
+    | "workday"
+    | "weekend"
+    | "paused"
+    | "skip_day"
+    | "work_override"
+    | "holiday";
+  label: string;
+  holidayName?: string;
+  holidayType?: string;
+  holidaySource?: "library" | "override";
+  note?: string | null;
+};
+
+export type DayOverride = { kind: "skip" | "work"; note: string | null };
+
+/** One day from GET /schedule/days: the gate's answer, plus the user's override. */
+export type DayView = {
+  date: string; // YYYY-MM-DD Manila
+  work: boolean;
+  reason: WorkdayReason;
+  override: DayOverride | null;
+};
+
 export type ScheduleView = {
   clockInTime: string;
   clockOutTime: string;
@@ -37,7 +62,12 @@ export type ScheduleView = {
   pausedFrom: string | null;
   pausedUntil: string | null;
   pausedToday: boolean;
-  today: { date: string; holiday: string | null };
+  today: {
+    date: string;
+    work: boolean;
+    reason: WorkdayReason;
+    holiday: string | null;
+  };
 };
 
 export type NotificationSettingsView = {
@@ -48,6 +78,7 @@ export type NotificationSettingsView = {
   notifyOnFailure: boolean;
   notifyOnSkipped: boolean;
   notifyOnMissed: boolean;
+  notifyHeadsUp: boolean;
   configured: boolean;
   blockedCount: number;
 };
@@ -106,6 +137,20 @@ export const api = {
     request<{ schedule: ScheduleView }>("/schedule", {
       method: "PUT",
       body: JSON.stringify(patch),
+    }),
+
+  getScheduleDays: (from: string, to: string) =>
+    request<{ days: DayView[] }>(
+      `/schedule/days?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    ),
+  putScheduleDay: (date: string, body: { kind: "skip" | "work"; note?: string }) =>
+    request<{ day: DayView }>(`/schedule/days/${encodeURIComponent(date)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  deleteScheduleDay: (date: string) =>
+    request<{ day: DayView }>(`/schedule/days/${encodeURIComponent(date)}`, {
+      method: "DELETE",
     }),
 
   getNotifications: () =>

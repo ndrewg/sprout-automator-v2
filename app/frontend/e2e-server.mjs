@@ -36,6 +36,17 @@ console.log(`[e2e-server] copied SPA → ${backendPublic}`);
 // Isolate e2e from the dev DB: use sprout_test and a dead SPROUT_URL so no run
 // could ever reach real HRHub. NODE_ENV=test keeps cookies non-Secure over http.
 // SIGNUP_ALLOWED must admit the smoke flow's @example.com signup (4A.2 gating).
+//
+// EXTRA_HOLIDAYS pins an operator holiday on TOMORROW (Manila), so the calendar
+// e2e has a deterministic holiday to mark as a workday without depending on
+// which real PH holidays happen to fall in the current month.
+const tomorrowManila = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Manila",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+}).format(new Date(Date.now() + 24 * 60 * 60 * 1000));
+
 const backendEnv = {
   ...process.env,
   NODE_ENV: "test",
@@ -45,12 +56,19 @@ const backendEnv = {
   SESSION_SECRET: "e2e-session-secret-not-for-production-123456789",
   SPROUT_URL: "http://127.0.0.1:9/",
   SIGNUP_ALLOWED: "example.com",
+  EXTRA_HOLIDAYS: `${tomorrowManila}=E2E Test Holiday`,
   // Every e2e flow runs in ~20s against one shared IP, and with the reset
   // endpoints behind authLimiter the suite now issues more auth requests than
   // the default 10/15min budget allows. Raise it here: e2e exercises flows,
   // not limits — the 11th-is-429 property is asserted by the integration suite
   // (signup-rate-limit.test.ts) at the default budget.
   AUTH_RATE_LIMIT: "100",
+  // The authenticated-API budget (default 120/min per IP, shared by every
+  // /credentials, /schedule, /runs and /notifications call). The e2e suite runs
+  // many parallel workers from 127.0.0.1 and several panels poll, so it would
+  // exhaust the real budget and produce 429s that look like test flakiness. The
+  // budget-is-enforced property is asserted by the integration suite instead.
+  API_RATE_LIMIT: "100000",
 };
 
 // Migrate the test database (the backend does not auto-migrate).

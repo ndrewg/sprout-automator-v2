@@ -64,6 +64,27 @@
       "when": 1791941621470,
       "tag": "0008_run_retry_at",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791950298624,
+      "tag": "0009_day_overrides",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791950310403,
+      "tag": "0010_drop_gazette_holidays",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791951456334,
+      "tag": "0011_heads_up",
+      "breakpoints": true
     }
   ]
 }

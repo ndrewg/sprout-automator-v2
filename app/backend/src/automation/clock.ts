@@ -3,7 +3,7 @@
 // bootbox dialogs.
 
 import type { Page } from "playwright";
-import { manilaDateString } from "../lib/ph-holidays";
+import { manilaDateString } from "../services/workday";
 import { screenshot } from "./screenshot";
 
 export type ClockAction = "in" | "out";

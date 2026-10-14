@@ -18,6 +18,8 @@ export type AuditEventType =
   | "password_reset_requested"
   | "password_reset_completed"
   | "email_verified"
+  | "day_override_set"
+  | "day_override_cleared"
   | "account_deleted";
 
 export type AuditContext = {

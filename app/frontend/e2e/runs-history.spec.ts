@@ -69,20 +69,25 @@ test("run history: Show more appends rows, the count stays honest, the button di
   seedRuns(me.user.id, SEED_COUNT);
   await page.reload();
 
+  // Scoped to the runs panel: since phase 16C the page also renders the day
+  // calendar, whose grid is a <table> with <tbody><tr> rows — a bare
+  // `tbody tr` locator would count those too.
+  const rows = page.locator('[data-testid="runs-panel"] tbody tr');
+
   // Default view: 10 rows, an honest count, and Show more present.
   await expect(page.getByText("Showing 10", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Show more" })).toBeVisible();
-  await expect(page.locator("tbody tr")).toHaveCount(10);
+  await expect(rows).toHaveCount(10);
 
   // First click: window grows to 30, still more to show.
   await page.getByRole("button", { name: "Show more" }).click();
   await expect(page.getByText("Showing 30", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Show more" })).toBeVisible();
-  await expect(page.locator("tbody tr")).toHaveCount(30);
+  await expect(rows).toHaveCount(30);
 
   // Second click: everything is loaded, the button disappears.
   await page.getByRole("button", { name: "Show more" }).click();
   await expect(page.getByText("Showing 40", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Show more" })).toHaveCount(0);
-  await expect(page.locator("tbody tr")).toHaveCount(40);
+  await expect(rows).toHaveCount(40);
 });

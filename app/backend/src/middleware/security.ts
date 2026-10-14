@@ -211,10 +211,10 @@ export const authLimiter = rateLimit({
   message: { error: "Too many attempts. Please try again later." },
 });
 
-/** Authenticated API endpoints: 120 requests / minute per client. */
+/** Authenticated API endpoints: API_RATE_LIMIT (default 120) requests / minute per client. */
 export const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
-  limit: 120,
+  limit: config.API_RATE_LIMIT,
   store: apiLimiterStore,
   keyGenerator: (req) => clientIp(req),
   standardHeaders: "draft-7",

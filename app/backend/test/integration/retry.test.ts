@@ -19,7 +19,7 @@ import {
   type Run,
 } from "../../src/db/schema";
 import { encrypt } from "../../src/lib/encryption";
-import { manilaDateString } from "../../src/lib/ph-holidays";
+import { manilaDateString } from "../../src/services/workday";
 import { executeQueuedRun } from "../../src/services/runs";
 import { fireDueRetries, startRun } from "../../src/services/run-lifecycle";
 import { runAutomation } from "../../src/automation/runAutomation";

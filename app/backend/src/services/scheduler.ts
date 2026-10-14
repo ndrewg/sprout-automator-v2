@@ -3,24 +3,18 @@ import { config, schedulerEnabled } from "../config";
 import { db } from "../db/client";
 import { runs, schedules, type Schedule } from "../db/schema";
 import { logger } from "../lib/logger";
-import { isPausedOn, manilaDateString } from "../lib/ph-holidays";
 import { onTick, TICK_MS } from "../lib/wall-clock-tick";
-import { startGazetteRefresh } from "./gazette";
-import { resolveHolidayDecision } from "./holidays";
 import { noteDeliberateSkip, registerRetryTick, startRun } from "./run-lifecycle";
-import {
-  expectedFireTime,
-  isWeekend,
-  notifyHolidaySkip,
-  sweepMissedRuns,
-} from "./notifications";
+import { notifySkip, sweepMissedRuns } from "./notifications";
+import { decideDay, expectedFireTime, manilaDateString } from "./workday";
 import type { ClockAction } from "../automation/clock";
 
-// The per-user daily scheduler (D8, reworked 2026-10-13, tightened 2026-10-14).
+// The per-user daily scheduler (D8, reworked 2026-10-13, tightened 2026-10-14,
+// repointed at the Workday gate 2026-10-14 in phase 16A).
 //
 // No timers per schedule. Registered schedules live in `active`; the shared
 // wall-clock tick (lib/wall-clock-tick.ts, every 15 s) asks dueSlots() which
-// Mon–Fri Manila slots have arrived and fires each ONCE per day. It replaced
+// Manila slots have arrived and fires each ONCE per day. It replaced
 // two node-cron tasks per user: node-cron slept on one long setTimeout per
 // slot, and on the scheduled host the monotonic clock drifts so far from the
 // wall clock (up to ~450 s/day measured) that the 05:30 slot woke 27 min late
@@ -30,8 +24,13 @@ import type { ClockAction } from "../automation/clock";
 // Phase 15C: the in-memory `fired` entry is a RE-ENTRANCY GUARD, not the
 // record. A slot counts as fired only once a run row (or a deliberate skip)
 // exists; anything that fails before that is retried on the next tick until the
-// slot's window closes. Before this, a single database error at 05:30:00 lost
-// the whole day silently.
+// slot's window closes.
+//
+// Phase 16A: the holiday/pause/weekend/override decision is NOT made here any
+// more. `fireCron` asks the Workday gate (`services/workday.ts`) one question —
+// "should this user be clocked on this Manila day, and why?" — and acts on the
+// answer. The Manila clock helpers come from the gate too: this module no
+// longer imports slot arithmetic from the notifications module.
 
 // userId -> the registered (enabled) schedule row. Module-global on purpose:
 // one scheduler per process.
@@ -87,10 +86,19 @@ export type DueSlot = {
 };
 
 /**
- * Pure: the slots due at `now`. A slot is due on a Manila weekday (Mon–Fri)
- * from its wall time up to `windowMs` after it, unless already fired. Holidays
- * and pause windows are NOT checked here; fireCron checks them at fire time,
- * so holiday data can change without re-registering anything.
+ * Pure: the slots due at `now`, on ANY Manila day, by wall-clock timing alone.
+ * A slot is due from its wall time up to `windowMs` after it, unless already
+ * fired. The work/non-work decision is NOT made here: `fireCron` asks the
+ * Workday gate at fire time, so holidays, WEEKENDS, the user's day overrides and
+ * pause windows ALL take effect without re-registering anything — including a
+ * "work anyway" override that turns a weekend or holiday into a clock-in.
+ *
+ * This deliberately no longer filters weekends (phase 16 review, defect B1).
+ * Filtering them here meant the scheduler never asked the gate on a Saturday,
+ * so a weekend override clocked nobody in — while the missed-run sweep, which
+ * DID ask the gate, saw a work day with no run and sent a false alert. Both now
+ * consult the one gate. A plain weekend is still silent: the gate says
+ * non-work, and `notifySkip` refuses to notify about a weekend.
  *
  * A schedule edited to a time that passed less than `windowMs` ago fires on the
  * next tick. That is intended: the slot is still inside its on-time window.
@@ -102,7 +110,6 @@ export function dueSlots(
   windowMs: number,
 ): DueSlot[] {
   const manilaDate = manilaDateString(now);
-  if (isWeekend(manilaDate)) return [];
   const due: DueSlot[] = [];
   for (const row of rows) {
     if (!row.enabled) continue;
@@ -162,7 +169,7 @@ export async function loadAllSchedules(): Promise<number> {
 export type FireResult =
   | { outcome: "created" } // this fire created the run row
   | { outcome: "existed" } // a run for this slot already existed (the user clicked first)
-  | { outcome: "skipped" } // a deliberate skip: holiday or pause window
+  | { outcome: "skipped" } // a deliberate skip: holiday, day override or pause window
   | { outcome: "not_started"; reason: "no_credentials" | "already_running" }
   | { outcome: "failed" }; // an error before either a run row or a skip existed
 
@@ -313,8 +320,8 @@ export function startScheduler(): void {
  * schedules anything time-based, and it logs one line either way:
  *
  *   false (the default) — no daily slots, no retry trigger, no missed-run
- *     sweep, no nightly jobs. Manual runs and the whole UI still work.
- *   true — rehydrate the enabled schedules, arm the tick and the nightly jobs.
+ *     sweep. Manual runs and the whole UI still work.
+ *   true — rehydrate the enabled schedules and arm the tick.
  *
  * Two hosts with separate databases cannot see each other's unique index, so an
  * unconfigured second machine would happily clock everyone a second time and
@@ -325,7 +332,7 @@ export async function startScheduling(): Promise<boolean> {
   if (!schedulerEnabled()) {
     logger.info(
       { schedulerEnabled: false },
-      "scheduler disabled (SCHEDULER_ENABLED is not true) — no daily slots, no retries, no missed-run sweep, no nightly jobs on this host; manual runs still work",
+      "scheduler disabled (SCHEDULER_ENABLED is not true) — no daily slots, no retries, no missed-run sweep on this host; manual runs still work",
     );
     return false;
   }
@@ -333,13 +340,9 @@ export async function startScheduling(): Promise<boolean> {
   const scheduleCount = await loadAllSchedules();
   logger.info({ scheduleCount }, "loaded schedules from database");
   startScheduler();
-  // Nightly Official Gazette refresh (cache-first advisory layer). Non-blocking:
-  // a cold cache degrades to the library, and a slow first fetch must not delay
-  // boot.
-  startGazetteRefresh();
   logger.info(
     { schedulerEnabled: true, scheduleCount },
-    "scheduler enabled (SCHEDULER_ENABLED=true) — daily slots, retries, the missed-run sweep and nightly jobs are armed",
+    "scheduler enabled (SCHEDULER_ENABLED=true) — daily slots, retries and the missed-run sweep are armed",
   );
   return true;
 }
@@ -352,14 +355,14 @@ export function resetSchedulerState(): void {
 }
 
 /**
- * Fired by the scheduler tick. Holiday check FIRST, then the pause window, then
- * create the run through the Run lifecycle. Never throws across the tick
- * boundary — the WHOLE path, decision included, sits inside one try, so a
- * database error in the holiday read (or anywhere else) is a `failed` result
- * the tick glue retries instead of a lost day (15C, path 5).
+ * Fired by the scheduler tick. Asks the Workday gate (phase 16A) whether this
+ * user should be clocked on this Manila day, and acts on the answer. Never
+ * throws across the tick boundary — the WHOLE path, decision included, sits
+ * inside one try, so a database error anywhere is a `failed` result the tick
+ * glue retries instead of a lost day (15C, path 5).
  *
- * The `now` param is the tick's instant, and it is threaded through every
- * check — the holiday and pause decisions must not take a second `new Date()`.
+ * The `now` param is the tick's instant, and it is threaded through — the gate
+ * must not take a second `new Date()`.
  */
 export async function fireCron(
   userId: string,
@@ -370,68 +373,33 @@ export async function fireCron(
   // enqueues a run. /health reads this as the "scheduler last fired" timestamp.
   lastFireAt = now.toISOString();
   try {
-    const decision = await resolveHolidayDecision(now);
-    if (decision.skip) {
+    const manilaDate = manilaDateString(now);
+    const decision = await decideDay({ userId, manilaDate, now });
+    if (!decision.work) {
       logger.info(
         {
           userId,
           action,
-          holiday: decision.skip.name,
-          type: decision.skip.type,
-          source: decision.skip.source,
+          reason: decision.reason.code,
+          detail: decision.reason.label,
         },
-        "skipping scheduled run — Philippine holiday",
+        "skipping scheduled run — the workday gate says today is not a work day",
       );
-      // Notify on an `optional` (special non-working day), an `override`
-      // (operator-typed), or a `gazette` (proclamation) skip — a `public`
-      // library holiday stays silent. The Gazette disagreement note (library's
-      // lunar date vs proclaimed date) is appended when present. Fire-and-forget:
-      // a dead Telegram endpoint must not change the skip decision or delay
-      // anything (hard rule 11). Idempotent via the database (one notice per
-      // user per Manila day), so the in/out fires of the same day and a restart
-      // cannot duplicate it.
-      void notifyHolidaySkip(userId, decision.skip, now, {
-        note: decision.disagreementNote,
-      }).catch(() => {}); // oxlint-disable-line promise/prefer-await-to-then -- sanctioned fire-and-forget idiom (#2), §03.
-      // A holiday is a deliberate no-run: the slot reached an outcome.
-      noteDeliberateSkip("holiday");
-      return { outcome: "skipped" };
-    }
-    // A "possible" holiday (regional/ambiguous gazette proclamation) does NOT
-    // skip — but the human should be told so they can decide. Notify without
-    // blocking the run (fire-and-forget), then proceed to enqueue normally.
-    if (decision.possible) {
-      void notifyHolidaySkip(userId, decision.possible, now, {
-        possible: true,
-      }).catch(() => {}); // oxlint-disable-line promise/prefer-await-to-then -- sanctioned fire-and-forget idiom (#2), §03.
-    }
-
-    const [schedule] = await db
-      .select()
-      .from(schedules)
-      .where(eq(schedules.userId, userId))
-      .limit(1);
-    if (schedule && isPausedOn(schedule, now)) {
-      // Pause window covers today: suppress automation, exactly like a holiday.
-      // Values are not secrets — log them so the skip is explainable.
-      logger.info(
-        {
-          userId,
-          action,
-          pausedFrom: schedule.pausedFrom,
-          pausedUntil: schedule.pausedUntil,
-        },
-        "skipping scheduled run — paused window",
-      );
-      noteDeliberateSkip("pause");
+      // Every skip notifies (phase 16D) except a weekend. `dueSlots` yields
+      // weekend slots too now (phase 16 review, B1) — the gate decides
+      // work/non-work — so a weekend arrives here as a non-work decision and
+      // `notifySkip` refuses it, keeping the day silent. Fire-and-forget: a dead
+      // Telegram endpoint must not change the skip decision or delay anything
+      // (hard rule 11).
+      // Idempotent via the database (one notice per user per Manila day), so
+      // the in/out fires of the same day and a restart cannot duplicate it.
+      void notifySkip({ userId, decision, now }).catch(() => {}); // oxlint-disable-line promise/prefer-await-to-then -- sanctioned fire-and-forget idiom (#2), §03.
+      // A skip is a deliberate no-run: the slot reached an outcome.
+      noteDeliberateSkip(decision.reason.code);
       return { outcome: "skipped" };
     }
 
-    const result = await startRun({
-      userId,
-      action,
-      manilaDate: manilaDateString(now),
-    });
+    const result = await startRun({ userId, action, manilaDate });
     if (result.ok) {
       logger.info({ userId, action, runId: result.run.id }, "scheduled run enqueued");
       return { outcome: "created" };

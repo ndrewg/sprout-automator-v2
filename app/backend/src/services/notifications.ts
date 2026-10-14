@@ -3,6 +3,7 @@ import { config } from "../config";
 import { db } from "../db/client";
 import {
   holidaySkipNotices,
+  headsUpNotices,
   missedRunNotices,
   notificationSettings,
   runs,
@@ -13,11 +14,6 @@ import {
 import { decryptOptional } from "../lib/encryption";
 import { recordAudit } from "../lib/audit";
 import { logger } from "../lib/logger";
-import {
-  isPausedOn,
-  manilaDateString,
-  type HolidayInfo,
-} from "../lib/ph-holidays";
 import { stripAnsi, truncateText } from "../lib/text";
 import {
   escapeHtml,
@@ -25,7 +21,16 @@ import {
   type TelegramSendResult,
 } from "../lib/telegram";
 import type { ClockAction } from "../automation/clock";
-import { resolveHolidayDecision } from "./holidays";
+import {
+  addManilaDays,
+  decideDay,
+  expectedFireTime,
+  formatManilaDay,
+  manilaDateString,
+  nextWorkday,
+  type DayDecision,
+  type WorkdayReason,
+} from "./workday";
 import { hasPendingRetry as hasPendingRetryInDb } from "./retry-state";
 
 // Policy for notifications. Deliberately HTTP-free (the transport lives in
@@ -44,7 +49,8 @@ export type DispatchKind =
   | "failure"
   | "skipped"
   | "missed"
-  | "holiday"
+  | "skip"
+  | "heads_up"
   | "retry";
 export type DispatchOutcome = "skipped" | "sent" | "failed";
 
@@ -60,43 +66,27 @@ const TOGGLE_FOR_KIND: Record<
   | "notifyOnFailure"
   | "notifyOnSkipped"
   | "notifyOnMissed"
+  | "notifyHeadsUp"
 > = {
   success: "notifyOnSuccess",
   failure: "notifyOnFailure",
   skipped: "notifyOnSkipped",
   missed: "notifyOnMissed",
-  // A holiday skip is "the automation did not run today, here's why" — the
-  // same class of informational alert as a missed run, so it honours the
-  // missed toggle (phase 11; no new toggle column).
-  holiday: "notifyOnMissed",
+  // A "skipping today" message (a holiday, the user's own skip day, a pause
+  // window — phase 16D) is muted by notify_on_skipped. Phase 11 mapped holiday
+  // skips to notify_on_missed; phase 16's contract is explicit that the mute is
+  // notify_on_skipped, so a user can silence "no clock today" without also
+  // silencing the missed-run alert that says the automator did not run.
+  skip: "notifyOnSkipped",
+  // The evening heads-up (phase 16D) has its own toggle, ON by default.
+  heads_up: "notifyHeadsUp",
   // A retry-scheduled / give-up message (phase 14) is a failure-adjacent
   // alert — the user's run failed and needs (or had) retrying — so it honours
   // the failure toggle. No new toggle column.
   retry: "notifyOnFailure",
 };
 
-// --- Time / message rendering (pure, unit-testable) -------------------------
-
-const timeFormatter = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "Asia/Manila",
-  hour: "2-digit",
-  minute: "2-digit",
-});
-
-function formatManilaDay(dateStr: string): string {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const dt = new Date(Date.UTC(y!, m! - 1, d!));
-  const weekday = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Manila",
-    weekday: "short",
-  }).format(dt);
-  const dayMonth = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Manila",
-    day: "2-digit",
-    month: "short",
-  }).format(dt);
-  return `${weekday} ${dayMonth}`;
-}
+// --- Message rendering (pure, unit-testable) --------------------------------
 
 export function renderRunFinishedMessage(params: {
   action: ClockAction;
@@ -107,7 +97,11 @@ export function renderRunFinishedMessage(params: {
 }): string {
   const { action, status, error, skipReason, date } = params;
   const label = action === "in" ? "Clock-in" : "Clock-out";
-  const time = timeFormatter.format(date);
+  const time = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Manila",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
   const day = formatManilaDay(manilaDateString(date));
 
   if (status === "success") {
@@ -160,56 +154,82 @@ export function renderMissedMessage(
 }
 
 /**
- * The "holiday skip" reminder (phase 11 + 13). Sent when the scheduler skips a
- * run because of a holiday that ISN'T a plain `public` library holiday: an
- * `optional` (special non-working day, phase 11), an operator `override`
- * (phase 13A — always notifies, a human typed it), or a `gazette` proclamation
- * (phase 13B). A `public` library holiday stays silent. The message names the
- * day and that the "Clock in now" button is there if they're working anyway;
- * override/gazette skips name their source, and an optional `note` (the Gazette
- * lunar-date disagreement) is appended when present.
+ * The "skipping today" message (phase 16D). Every skip notifies now, with its
+ * reason — a library holiday (which used to be silent, hiding a wrong library
+ * date until HR noticed), a holiday the operator added, a day the user marked
+ * as a skip, or a pause window. Weekends never notify.
+ *
+ * The dashboard link is there so a wrong call can be flipped in the calendar.
  */
-export function renderHolidaySkipMessage(
-  holiday: HolidayInfo,
+export function renderSkipMessage(
+  reason: WorkdayReason,
   dateStr: string,
-  note: string | null = null,
+  appUrl: string,
 ): string {
-  const name = escapeHtml(holiday.name);
   const day = formatManilaDay(dateStr);
-  let line: string;
-  if (holiday.source === "override") {
-    line = `🏖️ <b>${name}</b> is a holiday today (operator override) · ${day}`;
-  } else if (holiday.source === "gazette") {
-    line = `🏖️ <b>${name}</b> is a national holiday today (Official Gazette proclamation) · ${day}`;
-  } else {
-    line = `🏖️ <b>${name}</b> is a special non-working day today (${day})`;
-  }
-  const noteLine = note ? `\n${escapeHtml(note)}` : "";
-  return `${line}.\nNo clock was scheduled. Working after all? <b>Clock in now</b>.${noteLine}`;
+  const link = `<a href="${escapeHtml(appUrl)}">Change it in the dashboard</a>`;
+  return (
+    `⏭️ <b>Skipping today</b>: ${escapeHtml(reason.label)}\n` +
+    `${day}\n` +
+    `No clock was scheduled. Working after all? Clock in at HRHub, or ${link}.`
+  );
 }
 
 /**
- * The "possible holiday" reminder (phase 13B). Sent for a regional/ambiguous
- * Gazette proclamation — we do NOT skip (the scheduler still runs), but the
- * human is told so they can decide whether today is actually a holiday for them.
+ * The evening heads-up (phase 16D). Sent once, after the user's scheduled
+ * clock-out run reaches an outcome, naming the NEXT workday's decision:
+ *
+ *   "Next: Mon 26 Oct 05:30 clock-in."
+ *   "Tomorrow (Mon 2 Nov) is All Souls' Day (special non-working), so no
+ *    clock-in. Next clock-in: Tue 05:30."
+ *   "Mon 2 Nov is a day you marked as a workday, so clocking in at 05:30."
+ *
+ * `next` is the gate's decision for the next work day (which may be later than
+ * tomorrow), `tomorrow` is the gate's decision for tomorrow. Always carries a
+ * dashboard link, so a wrong call can be flipped in the calendar before the
+ * morning it would have mattered.
  */
-export function renderPossibleHolidayMessage(
-  holiday: HolidayInfo,
-  dateStr: string,
-): string {
-  const name = escapeHtml(holiday.name);
-  const day = formatManilaDay(dateStr);
+export function renderHeadsUpMessage(params: {
+  clockInTime: string;
+  tomorrowDate: string;
+  tomorrow: { work: boolean; reason: WorkdayReason };
+  next: { manilaDate: string; reason: WorkdayReason };
+  appUrl: string;
+}): string {
+  const { clockInTime, tomorrowDate, tomorrow, next, appUrl } = params;
+  const hhmm = clockInTime.length >= 5 ? clockInTime.slice(0, 5) : clockInTime;
+  const link = `<a href="${escapeHtml(appUrl)}">Open the dashboard</a>`;
+  const tomorrowDay = formatManilaDay(tomorrowDate);
+  const nextDay = formatManilaDay(next.manilaDate);
+  const nextWeekday = nextDay.split(" ")[0];
+
+  if (next.manilaDate === tomorrowDate) {
+    if (tomorrow.reason.code === "work_override") {
+      return (
+        `🌙 <b>Heads-up</b>\n` +
+        `${tomorrowDay} is a day you marked as a workday, so clocking in at ${hhmm}.\n` +
+        `${link}`
+      );
+    }
+    return (
+      `🌙 <b>Heads-up</b>\n` +
+      `Next: ${nextDay} ${hhmm} clock-in.\n` +
+      `${link}`
+    );
+  }
+
   return (
-    `🔎 <b>Possible holiday</b> · ${day}\n` +
-    `${name} is listed in the Official Gazette for this date, but only for a ` +
-    `specific area. The scheduler ran as normal — check whether you're working.`
+    `🌙 <b>Heads-up</b>\n` +
+    `Tomorrow (${tomorrowDay}) is ${escapeHtml(tomorrow.reason.label)}, so no clock-in. ` +
+    `Next clock-in: ${nextWeekday} ${hhmm}.\n` +
+    `${link}`
   );
 }
 
 // --- The single send path ---------------------------------------------------
 
 /**
- * dispatch(userId, html, kind) — the only way a notification is sent.
+ * dispatch(userId, html, kind, send) — the only way a notification is sent.
  *
  * Returns three states on purpose: "skipped" (don't-send) must NEVER reset
  * blockedCount, or a user with notifications off would silently clear their
@@ -303,46 +323,39 @@ export async function notifyRunFinished(params: {
 }
 
 /**
- * The holiday notification, called from fireCron on a holiday skip (or a
- * "possible holiday" that does NOT skip). Distinct from the run-finished
- * dispatch because there is NO run row — fireCron returns before any runs
- * insert.
+ * The "skipping today" notification, called from fireCron when the Workday gate
+ * says today is not a work day. Distinct from the run-finished dispatch because
+ * there is NO run row — fireCron returns before any runs insert.
  *
  * Idempotent via the database (the same "let the database decide" pattern as
- * the missed-run notices): we insert a holiday_skip_notices row keyed on
+ * the missed-run notices): we insert a `holiday_skip_notices` row keyed on
  * (user_id, manila_date) and only the insert-winner sends. The key omits
- * `action` so the in/out cron fires of the same day produce ONE message, and a
+ * `action` so the in/out fires of the same day produce ONE message, and a
  * container restart cannot duplicate it. No state is held in memory.
- *
- * What fires (phase 11 + 13): an `optional` (special non-working day), an
- * operator `override` (always), or a `gazette` proclamation. A `public`
- * library holiday stays silent — nobody needs a Christmas Day message, and a
- * channel that fires on every predictable holiday is a channel people mute.
+ * (The table keeps its phase-11 name; since phase 16D it carries EVERY skip,
+ * not only holidays.)
  *
  * This is deliberately fire-and-forget (callers use `.catch(() => {})`): a dead
  * Telegram endpoint must not change the skip decision or delay anything (hard
  * rule 11). The `send` param is for tests.
  */
-export async function notifyHolidaySkip(
-  userId: string,
-  holiday: HolidayInfo,
-  now: Date,
-  optsOrSend?: { possible?: boolean; note?: string | null } | SendFn,
-  send: SendFn = sendTelegramMessage,
-): Promise<"sent" | "skipped"> {
-  // Backward-compatible: phase-11 callers passed `send` as the 4th arg. Accept
-  // either an options object (phase 13) or a send function there.
-  const opts =
-    typeof optsOrSend === "function" ? {} : (optsOrSend ?? {});
-  const actualSend = typeof optsOrSend === "function" ? optsOrSend : send;
+export async function notifySkip(params: {
+  userId: string;
+  decision: DayDecision;
+  now: Date;
+  send?: SendFn;
+}): Promise<"sent" | "skipped"> {
+  const { userId, decision } = params;
+  if (decision.work) return "skipped";
+  // A weekend is not a skip anybody needs telling about. The gate decides
+  // work/non-work and `fireCron` asks it, so a weekend reaches here only as a
+  // non-work decision that must stay silent. (`dueSlots` no longer filters
+  // weekends out — phase 16 review, B1 — so THIS guard is what keeps them
+  // quiet.) Returning before the insert means no notice row is written either.
+  if (decision.reason.code === "weekend") return "skipped";
 
-  // Silent ONLY for a plain `public` library holiday. Overrides and gazette
-  // skips always notify; `optional` (special non-working days) notify; a
-  // "possible" (regional/ambiguous gazette) notification always fires.
-  if (holiday.type !== "optional" && holiday.source === "library") {
-    return "skipped";
-  }
-  const dateStr = manilaDateString(now);
+  const dateStr = decision.manilaDate;
+  const send = params.send ?? sendTelegramMessage;
 
   // The database decides who sends: onConflictDoNothing means a conflicting
   // (user, date) returns NO row, and only a real insert returns one. Two
@@ -356,36 +369,103 @@ export async function notifyHolidaySkip(
     .returning();
   if (inserted === undefined) return "skipped";
 
-  const html = opts.possible
-    ? renderPossibleHolidayMessage(holiday, dateStr)
-    : renderHolidaySkipMessage(holiday, dateStr, opts.note ?? null);
-  const outcome = await dispatch(userId, html, "holiday", actualSend);
+  const html = renderSkipMessage(decision.reason, dateStr, config.APP_URL);
+  const outcome = await dispatch(userId, html, "skip", send);
+  return outcome === "sent" ? "sent" : "skipped";
+}
+
+/**
+ * The evening heads-up: ONE message about the next workday's decision, sent
+ * after the user's clock-out run reaches an outcome (phase 16D). It is the
+ * cross-check that catches a wrong holiday call before it becomes a false
+ * record, and it replaces the old "the library says so, trust it".
+ *
+ * Once per user per Manila day, recorded in the DATABASE (`heads_up_notices`,
+ * unique on user+date) — never an in-memory flag, because the process restarts.
+ * A second clock-out run, a retry of one, or a container restart therefore
+ * cannot duplicate it.
+ *
+ * Fire-and-forget at the call site (hard rule 11): a dead Telegram endpoint
+ * must never change a run's status or timing. The `send` param is for tests.
+ */
+export type HeadsUpDeps = {
+  nextWorkday: (params: {
+    userId: string;
+    from: string;
+    now?: Date;
+  }) => Promise<DayDecision | null>;
+  loadClockInTime: (userId: string) => Promise<string>;
+};
+
+export const defaultHeadsUpDeps: HeadsUpDeps = {
+  nextWorkday: (params) => nextWorkday(params),
+  loadClockInTime: async (userId) => {
+    const [row] = await db
+      .select({ clockInTime: schedules.clockInTime })
+      .from(schedules)
+      .where(eq(schedules.userId, userId))
+      .limit(1);
+    return row?.clockInTime ?? "05:30:00";
+  },
+};
+
+export async function notifyHeadsUp(
+  params: { userId: string; now: Date },
+  send: SendFn = sendTelegramMessage,
+  deps: Partial<HeadsUpDeps> = {},
+): Promise<"sent" | "skipped"> {
+  const d: HeadsUpDeps = { ...defaultHeadsUpDeps, ...deps };
+  const { userId, now } = params;
+  const today = manilaDateString(now);
+  const tomorrowDate = addManilaDays(today, 1);
+
+  const next = await d.nextWorkday({ userId, from: today, now });
+  // Nothing ahead but skips: there is no next clock-in to announce, so do not
+  // consume the day's slot.
+  if (!next) return "skipped";
+
+  const tomorrow: DayDecision = await decideDay({
+    userId,
+    manilaDate: tomorrowDate,
+    now,
+  });
+  const clockInTime = await d.loadClockInTime(userId);
+
+  // The database decides who sends (the same pattern as the missed-run notices
+  // and the skip notices): onConflictDoNothing returns NO row when this user
+  // already had a heads-up today.
+  const [inserted] = await db
+    .insert(headsUpNotices)
+    .values({ userId, manilaDate: today })
+    .onConflictDoNothing({
+      target: [headsUpNotices.userId, headsUpNotices.manilaDate],
+    })
+    .returning();
+  if (inserted === undefined) return "skipped";
+
+  const html = renderHeadsUpMessage({
+    clockInTime,
+    tomorrowDate,
+    tomorrow,
+    next,
+    appUrl: config.APP_URL,
+  });
+  const outcome = await dispatch(userId, html, "heads_up", send);
   return outcome === "sent" ? "sent" : "skipped";
 }
 
 // --- Missed-run reconciliation ----------------------------------------------
 
-/** "YYYY-MM-DD" Manila date; true for Saturday/Sunday. */
-export function isWeekend(dateStr: string): boolean {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const day = new Date(Date.UTC(y!, m! - 1, d!)).getUTCDay();
-  return day === 0 || day === 6;
-}
-
-/** The instant a schedule time (Manila wall clock) fires on `dateStr`. */
-export function expectedFireTime(dateStr: string, timeStr: string): Date {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const [h, min] = timeStr.split(":").map(Number);
-  if (!y || !m || !d || h === undefined || min === undefined) {
-    throw new Error(`expectedFireTime: invalid date/time ${dateStr} ${timeStr}`);
-  }
-  // dateStr/timeStr are Asia/Manila wall time; Manila is UTC+8 year-round.
-  return new Date(Date.UTC(y, m - 1, d, h, min) - 8 * 60 * 60 * 1000);
-}
-
 export type SweepDeps = {
   now: () => Date;
-  isWorkday: (date: Date) => boolean | Promise<boolean>;
+  /**
+   * Whether this Manila day is a work day FOR THIS USER (phase 16A): the
+   * Workday gate's `work` answer, so the sweep sees the same holidays, pause
+   * windows and per-user day overrides the scheduler does. A day the gate says
+   * to skip is not a missed run — alerting on it would train the user to ignore
+   * the alerts.
+   */
+  isWorkday: (userId: string, manilaDate: string) => boolean | Promise<boolean>;
   loadEnabledSchedules: () => Promise<Schedule[]>;
   hasRunToday: (
     userId: string,
@@ -422,9 +502,8 @@ export type SweepDeps = {
 
 export const defaultSweepDeps: SweepDeps = {
   now: () => new Date(),
-  isWorkday: async (date) =>
-    !isWeekend(manilaDateString(date)) &&
-    (await resolveHolidayDecision(date)).skip === null,
+  isWorkday: async (userId, manilaDate) =>
+    (await decideDay({ userId, manilaDate })).work,
   loadEnabledSchedules: async () =>
     db.select().from(schedules).where(eq(schedules.enabled, true)),
   hasRunToday: async (userId, action, dateStr, now) => {
@@ -503,25 +582,22 @@ export async function sweepMissedRuns(
 ): Promise<void> {
   try {
     const now = deps.now();
-    // Same rules as fireCron: a weekend or holiday is not a missed run. A
-    // "possible" (regional/ambiguous gazette) holiday does NOT skip, so it is
-    // still a workday for the sweep — the run was expected to proceed.
-    if (!(await deps.isWorkday(now))) return;
-
     const todayStr = manilaDateString(now);
-    const graceMs = config.MISSED_RUN_GRACE_MINUTES * 60 * 1000;
     const rows = await deps.loadEnabledSchedules();
 
     for (const row of rows) {
-      // A paused day is not a missed run — alerting on it would train the user
-      // to ignore the alerts. Same rule as fireCron: skip, don't notify.
-      if (isPausedOn(row, now)) continue;
+      // The Workday gate owns the whole per-user decision (weekend, holiday,
+      // pause window, the user's own day override). A day it says to skip is
+      // not a missed run.
+      if (!(await deps.isWorkday(row.userId, todayStr))) continue;
 
       for (const action of ["in", "out"] as const) {
         const timeStr = action === "in" ? row.clockInTime : row.clockOutTime;
         const expected = expectedFireTime(todayStr, timeStr);
         // Grace window absorbs queue wait and a slow HRHub.
-        if (now.getTime() < expected.getTime() + graceMs) continue;
+        if (now.getTime() < expected.getTime() + config.MISSED_RUN_GRACE_MINUTES * 60 * 1000) {
+          continue;
+        }
 
         const hasRun = await deps.hasRunToday(row.userId, action, todayStr, now);
         // A retry is queued: the morning is being handled — a missed-run alert

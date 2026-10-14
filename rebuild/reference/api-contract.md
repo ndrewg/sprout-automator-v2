@@ -81,9 +81,31 @@ No body. Reads the stored (decrypted) Gmail email + app password, runs `testImap
   pausedFrom: string | null, // "YYYY-MM-DD" Manila day, inclusive; set/cleared as a pair
   pausedUntil: string | null,// inclusive
   pausedToday: boolean,    // server-computed; the UI must not recompute Manila dates
-  today: { date: string /* YYYY-MM-DD Manila */, holiday: string | null }
+  today: {
+    date: string,           // "YYYY-MM-DD" Manila
+    work: boolean,          // the Workday gate's answer for today (phase 16A)
+    reason: WorkdayReason,  // why (see below)
+    holiday: string | null  // the holiday NAME when today is a holiday, else null
+  }
 }
 ```
+
+`WorkdayReason` (phase 16A) — the gate's answer, shared by `/schedule` and
+`/schedule/days`:
+```ts
+{
+  code: "workday" | "weekend" | "paused" | "skip_day" | "work_override" | "holiday",
+  label: string,             // e.g. "All Souls' Day (special non-working)", "your skip day"
+  holidayName?: string,      // present when code === "holiday"
+  holidayType?: string,      // "public" | "optional" | "bank" | …
+  holidaySource?: "library" | "override",
+  note?: string | null       // the user's own note on a day override, when set
+}
+```
+
+Precedence (highest first): the user's own **day override** → **pause range** →
+**weekend** → company `EXTRA_HOLIDAYS` → library holiday of a skipping type
+(`public`, `bank`, `optional`). A user override beats a pause on that exact day.
 
 ### `GET /schedule`
 - `200 { "schedule": ScheduleView }`. No row yet → defaults `05:30:00`/`18:05:00`, `enabled:false`, `configured:false`, `pausedFrom`/`pausedUntil` `null`, `pausedToday:false`, with `today` populated.
@@ -97,6 +119,44 @@ Date regex: `/^\d{4}-\d{2}-\d{2}$/` (Manila calendar day; nullable). The pause w
 - `400 { "error": "Provide both pausedFrom and pausedUntil, or neither." }` if exactly one side is present (or one side is `null`).
 - `400 { "error": "pausedUntil must be on or after pausedFrom" }` for a reversed range.
 - `400 { "error": "That pause window has already ended." }` if `pausedUntil` is in the past.
+
+### Day overrides — `/schedule/days`  *(phase 16B, auth required, rate-limited 120/min)*
+
+`DayView`:
+```ts
+{
+  date: string,            // "YYYY-MM-DD" Manila
+  work: boolean,           // the gate's answer
+  reason: WorkdayReason,   // why
+  override: { kind: "skip" | "work", note: string | null } | null  // the user's own row
+}
+```
+
+### `GET /schedule/days?from=YYYY-MM-DD&to=YYYY-MM-DD`
+- `200 { "days": DayView[] }` — one entry per day in the range, in order. The
+  calendar renders from this one call; the frontend never re-implements the gate.
+- Query schema is `.strict()`; `from` and `to` are both required and must be real
+  calendar dates. Missing, malformed, unknown keys, `to < from`, or a range of
+  more than **92 days** → `400 { "error": … }` (never a silent clamp).
+- **Past days are allowed** (a month view legitimately shows them); only writes
+  are date-gated.
+
+### `PUT /schedule/days/:date`
+Body (`.strict()`): `{ "kind": "skip" | "work", "note"?: string (≤100) }`. An
+empty/omitted note clears it.
+- `200 { "day": DayView }` — the upsert is one row per `(user, date)`, so setting
+  the other kind **replaces** it. Audits `day_override_set` (`{ date, kind }`
+  only — never the note text).
+- Setting an override for **today** to a skip that makes today's decision
+  `work: false` **cancels today's pending retry** (through the Run lifecycle).
+- `400` for a malformed / unreal date, a past date, an unknown `kind`, a note
+  over 100 chars, or an unknown field.
+- Scoped to `req.user.id`.
+
+### `DELETE /schedule/days/:date`
+- `200 { "day": DayView }` — clears the override (idempotent: no row is not an
+  error). Audits `day_override_cleared` **only** when a row was actually removed.
+- `400` for a malformed / unreal or past date.
 
 ---
 

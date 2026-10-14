@@ -1,7 +1,7 @@
 import { and, eq, inArray, isNotNull, lte } from "drizzle-orm";
 import { db } from "../db/client";
 import { runs, type Run } from "../db/schema";
-import { manilaDateString } from "../lib/ph-holidays";
+import { manilaDateString } from "./workday";
 import type { ClockAction } from "../automation/clock";
 
 // The DATABASE half of retry state (phase 15B, D20). A pending retry is a

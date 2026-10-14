@@ -75,7 +75,7 @@ describe("the scheduler gate", () => {
     process.env["SCHEDULER_ENABLED"] = "true";
     expect(await startScheduling()).toBe(true);
     expect(tickHandlerNames()).toEqual(
-      expect.arrayContaining(["scheduler", "retries", "gazette"]),
+      expect.arrayContaining(["scheduler", "retries"]),
     );
 
     // The schedule is registered, so /health's registered-vs-enabled check is

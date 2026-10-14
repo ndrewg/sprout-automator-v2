@@ -10,7 +10,7 @@ import {
 import { and, eq, isNotNull } from "drizzle-orm";
 import { db } from "../../src/db/client";
 import { runs, schedules, type Run } from "../../src/db/schema";
-import { manilaDateString } from "../../src/lib/ph-holidays";
+import { manilaDateString } from "../../src/services/workday";
 import {
   cancelPendingRetriesForUser,
   failRunFromExecutor,

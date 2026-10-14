@@ -15,7 +15,7 @@ import { executeQueuedRun } from "../../src/services/runs";
 import { fireCron } from "../../src/services/scheduler";
 import { finishRun, startRun } from "../../src/services/run-lifecycle";
 import { clearPendingRetry } from "../../src/services/retry-state";
-import { manilaDateString } from "../../src/lib/ph-holidays";
+import { manilaDateString } from "../../src/services/workday";
 import { runAutomation } from "../../src/automation/runAutomation";
 import {
   closeTestServer,

@@ -3,17 +3,17 @@ import { encrypt } from "../../src/lib/encryption";
 import { escapeHtml, type TelegramSendResult } from "../../src/lib/telegram";
 import {
   dispatch,
-  expectedFireTime,
-  isWeekend,
-  notifyHolidaySkip,
   notifyRunFinished,
-  renderHolidaySkipMessage,
+  notifySkip,
+  renderHeadsUpMessage,
   renderMissedMessage,
   renderRunFinishedMessage,
+  renderSkipMessage,
   sweepMissedRuns,
   type SweepDeps,
 } from "../../src/services/notifications";
 import type { Run } from "../../src/db/schema";
+import type { DayDecision, WorkdayReason } from "../../src/services/workday";
 
 // Dispatch needs no network (fake transport) and no real database (mocked
 // db/client + audit). The sweep is fully dependency-injected. Nothing here
@@ -294,51 +294,48 @@ describe("renderMissedMessage", () => {
   });
 });
 
-describe("renderHolidaySkipMessage", () => {
-  it("names the holiday, says it is special non-working, and offers Clock in now", () => {
+describe("renderSkipMessage", () => {
+  const APP = "https://sprout.example.com";
+
+  it("names the holiday and its type", () => {
     expect(
-      renderHolidaySkipMessage(
-        { name: "Ninoy Aquino Day", type: "optional", source: "library" },
+      renderSkipMessage(
+        {
+          code: "holiday",
+          label: "Ninoy Aquino Day (special non-working)",
+          holidayName: "Ninoy Aquino Day",
+          holidayType: "optional",
+          holidaySource: "library",
+        },
         "2026-08-21",
+        APP,
       ),
     ).toBe(
-      "🏖️ <b>Ninoy Aquino Day</b> is a special non-working day today (Fri 21 Aug).\n" +
-        "No clock was scheduled. Working after all? <b>Clock in now</b>.",
+      "⏭️ <b>Skipping today</b>: Ninoy Aquino Day (special non-working)\n" +
+        "Fri 21 Aug\n" +
+        "No clock was scheduled. Working after all? Clock in at HRHub, or " +
+        `<a href="${APP}">Change it in the dashboard</a>.`,
     );
   });
 
-  it("names the source for an operator override and a gazette proclamation", () => {
-    const override = renderHolidaySkipMessage(
-      { name: "Special Day", type: "public", source: "override" },
-      "2026-08-21",
-    );
-    expect(override).toContain("Special Day");
-    expect(override).toContain("operator override");
-    expect(override).toContain("Clock in now");
-
-    const gazette = renderHolidaySkipMessage(
-      { name: "Eid'l Fitr", type: "public", source: "gazette" },
-      "2026-08-21",
-    );
-    expect(gazette).toContain("Eid'l Fitr");
-    expect(gazette).toContain("Official Gazette proclamation");
-    expect(gazette).toContain("Clock in now");
+  it("renders the user's own reasons (skip day, pause window)", () => {
+    expect(
+      renderSkipMessage({ code: "skip_day", label: "your skip day" }, "2026-08-21", APP),
+    ).toContain("Skipping today</b>: your skip day");
+    expect(
+      renderSkipMessage(
+        { code: "paused", label: "your pause window" },
+        "2026-08-21",
+        APP,
+      ),
+    ).toContain("Skipping today</b>: your pause window");
   });
 
-  it("appends a gazette disagreement note when one is supplied", () => {
-    const html = renderHolidaySkipMessage(
-      { name: "Eid'l Fitr", type: "public", source: "gazette" },
-      "2026-03-21",
-      "The bundled calendar placed Eid'l Fitr on 2026-03-20, but the Official Gazette proclaims 2026-03-21. The library's date looks wrong.",
-    );
-    expect(html).toContain("2026-03-20");
-    expect(html).toContain("looks wrong");
-  });
-
-  it("escapes markup in a holiday name before inserting it into HTML", () => {
-    const html = renderHolidaySkipMessage(
-      { name: "Feast <b>&</b>", type: "optional", source: "library" },
+  it("escapes markup in the reason before inserting it into HTML", () => {
+    const html = renderSkipMessage(
+      { code: "holiday", label: "Feast <b>&</b> (regular holiday)" },
       "2026-08-21",
+      APP,
     );
     expect(html).not.toContain("<b>Feast <b>");
     expect(html).toContain("Feast &lt;b&gt;&amp;&lt;/b&gt;");
@@ -470,7 +467,7 @@ describe("notifyRunFinished", () => {
   });
 });
 
-describe("notifyHolidaySkip — the special-non-working-day reminder", () => {
+describe("notifySkip — every skip, once per day", () => {
   const NOW = new Date("2026-08-21T04:00:00Z"); // noon Manila, Ninoy Aquino Day
   const sendMock2 = vi.fn<
     (botToken: string, chatId: string, html: string) => Promise<TelegramSendResult>
@@ -485,47 +482,111 @@ describe("notifyHolidaySkip — the special-non-working-day reminder", () => {
     }));
   }
 
-  it("is silent for a public holiday (no insert, no send)", async () => {
+  function day(reason: WorkdayReason, work = false): DayDecision {
+    return { manilaDate: "2026-08-21", work, reason, override: null };
+  }
+
+  const HOLIDAY: WorkdayReason = {
+    code: "holiday",
+    label: "Ninoy Aquino Day (special non-working)",
+    holidayName: "Ninoy Aquino Day",
+    holidayType: "optional",
+    holidaySource: "library",
+  };
+
+  it("sends one message for a library holiday when the insert wins", async () => {
     stubDb(makeRow());
     stubInsert([{ id: "n1" }]);
-    const out = await notifyHolidaySkip(
-      "user-1",
-      { name: "Christmas Day", type: "public", source: "library" },
-      new Date("2026-12-25T04:00:00Z"),
-      sendMock2,
-    );
+    sendMock2.mockResolvedValue({ ok: true });
+    const out = await notifySkip({
+      userId: "user-1",
+      decision: day(HOLIDAY),
+      now: NOW,
+      send: sendMock2,
+    });
+    expect(out).toBe("sent");
+    expect(sendMock2).toHaveBeenCalledTimes(1);
+    const html = sendMock2.mock.calls[0]![2];
+    expect(html).toContain("Skipping today");
+    expect(html).toContain("Ninoy Aquino Day");
+  });
+
+  it("notifies for a plain `public` library holiday too — no silent skips (phase 16D)", async () => {
+    stubDb(makeRow());
+    stubInsert([{ id: "n1" }]);
+    sendMock2.mockResolvedValue({ ok: true });
+    const out = await notifySkip({
+      userId: "user-1",
+      decision: day({
+        code: "holiday",
+        label: "Christmas Day (regular holiday)",
+        holidayName: "Christmas Day",
+        holidayType: "public",
+        holidaySource: "library",
+      }),
+      now: new Date("2026-12-25T04:00:00Z"),
+      send: sendMock2,
+    });
+    expect(out).toBe("sent");
+    expect(sendMock2.mock.calls[0]![2]).toContain("Christmas Day");
+  });
+
+  it("names the user's own skip day", async () => {
+    stubDb(makeRow());
+    stubInsert([{ id: "n1" }]);
+    sendMock2.mockResolvedValue({ ok: true });
+    const out = await notifySkip({
+      userId: "user-1",
+      decision: day({ code: "skip_day", label: "your skip day", note: null }),
+      now: NOW,
+      send: sendMock2,
+    });
+    expect(out).toBe("sent");
+    expect(sendMock2.mock.calls[0]![2]).toContain("your skip day");
+  });
+
+  it("never notifies for a weekend", async () => {
+    stubDb(makeRow());
+    stubInsert([{ id: "n1" }]);
+    const out = await notifySkip({
+      userId: "user-1",
+      decision: {
+        manilaDate: "2026-08-22",
+        work: false,
+        reason: { code: "weekend", label: "weekend" },
+        override: null,
+      },
+      now: NOW,
+      send: sendMock2,
+    });
     expect(out).toBe("skipped");
     expect(insertMock).not.toHaveBeenCalled();
     expect(sendMock2).not.toHaveBeenCalled();
   });
 
-  it("sends one reminder for an optional holiday when the insert wins", async () => {
+  it("does nothing for a work day", async () => {
     stubDb(makeRow());
     stubInsert([{ id: "n1" }]);
-    sendMock2.mockResolvedValue({ ok: true });
-    const out = await notifyHolidaySkip(
-      "user-1",
-      { name: "Ninoy Aquino Day", type: "optional", source: "library" },
-      NOW,
-      sendMock2,
-    );
-    expect(out).toBe("sent");
-    expect(sendMock2).toHaveBeenCalledTimes(1);
-    const html = sendMock2.mock.calls[0]![2];
-    expect(html).toContain("Ninoy Aquino Day");
-    expect(html).toContain("Clock in now");
+    const out = await notifySkip({
+      userId: "user-1",
+      decision: day({ code: "workday", label: "workday" }, true),
+      now: NOW,
+      send: sendMock2,
+    });
+    expect(out).toBe("skipped");
+    expect(insertMock).not.toHaveBeenCalled();
   });
 
   it("does not re-send when a prior insert already claimed the day (idempotent)", async () => {
     stubDb(makeRow());
     stubInsert([]); // onConflictDoNothing returned no row — another fire won
     sendMock2.mockResolvedValue({ ok: true });
-    const out = await notifyHolidaySkip(
-      "user-1",
-      { name: "Ninoy Aquino Day", type: "optional", source: "library" },
-      NOW,
-      sendMock2,
-    );
+    const out = await notifySkip({
+      userId: "user-1",
+      decision: day(HOLIDAY),
+      now: NOW,
+      send: sendMock2,
+    });
     expect(out).toBe("skipped");
     expect(sendMock2).not.toHaveBeenCalled();
   });
@@ -534,33 +595,86 @@ describe("notifyHolidaySkip — the special-non-working-day reminder", () => {
     stubDb(makeRow({ enabled: false }));
     stubInsert([{ id: "n1" }]);
     sendMock2.mockResolvedValue({ ok: true });
-    const out = await notifyHolidaySkip(
-      "user-1",
-      { name: "Ninoy Aquino Day", type: "optional", source: "library" },
-      NOW,
-      sendMock2,
-    );
+    const out = await notifySkip({
+      userId: "user-1",
+      decision: day(HOLIDAY),
+      now: NOW,
+      send: sendMock2,
+    });
     // The insert won, but dispatch declined to send — a dead/off notification
-    // setting must not throw or change the (silent) outcome.
+    // setting must not throw or change the outcome.
+    expect(out).toBe("skipped");
+    expect(sendMock2).not.toHaveBeenCalled();
+  });
+
+  it("is muted by the notify_on_skipped toggle", async () => {
+    stubDb(makeRow({ notifyOnSkipped: false }));
+    stubInsert([{ id: "n1" }]);
+    sendMock2.mockResolvedValue({ ok: true });
+    const out = await notifySkip({
+      userId: "user-1",
+      decision: day(HOLIDAY),
+      now: NOW,
+      send: sendMock2,
+    });
     expect(out).toBe("skipped");
     expect(sendMock2).not.toHaveBeenCalled();
   });
 });
 
-describe("expectedFireTime / isWeekend", () => {
-  it("converts Manila wall-clock date+time to an instant", () => {
-    expect(expectedFireTime("2026-08-10", "05:30:00").getTime()).toBe(
-      new Date("2026-08-10T05:30:00+08:00").getTime(),
-    );
-    expect(expectedFireTime("2026-08-10", "18:05:00").getTime()).toBe(
-      new Date("2026-08-10T18:05:00+08:00").getTime(),
+describe("renderHeadsUpMessage", () => {
+  const APP = "https://sprout.example.com";
+  const plain = (label: string) => ({ work: true, reason: { code: "workday" as const, label } });
+
+  it("names the next clock-in when tomorrow is a workday", () => {
+    expect(
+      renderHeadsUpMessage({
+        clockInTime: "05:30:00",
+        tomorrowDate: "2026-08-12",
+        tomorrow: plain("workday"),
+        next: { manilaDate: "2026-08-12", reason: { code: "workday", label: "workday" } },
+        appUrl: APP,
+      }),
+    ).toBe(
+      "🌙 <b>Heads-up</b>\nNext: Wed 12 Aug 05:30 clock-in.\n" +
+        `<a href="${APP}">Open the dashboard</a>`,
     );
   });
 
-  it("detects weekends from the Manila date string", () => {
-    expect(isWeekend("2026-08-08")).toBe(true); // Saturday
-    expect(isWeekend("2026-08-09")).toBe(true); // Sunday
-    expect(isWeekend("2026-08-10")).toBe(false); // Monday
+  it("explains a skipped tomorrow and names the next clock-in", () => {
+    const html = renderHeadsUpMessage({
+      clockInTime: "05:30:00",
+      tomorrowDate: "2026-11-02",
+      tomorrow: {
+        work: false,
+        reason: {
+          code: "holiday",
+          label: "All Souls' Day (special non-working)",
+        },
+      },
+      next: { manilaDate: "2026-11-03", reason: { code: "workday", label: "workday" } },
+      appUrl: APP,
+    });
+    expect(html).toContain("Tomorrow (Mon 2 Nov) is All Souls' Day (special non-working)");
+    expect(html).toContain("Next clock-in: Tue 05:30.");
+  });
+
+  it("calls out a day the user marked as a workday", () => {
+    const html = renderHeadsUpMessage({
+      clockInTime: "06:00:00",
+      tomorrowDate: "2026-11-02",
+      tomorrow: {
+        work: true,
+        reason: { code: "work_override", label: "you marked this as a workday" },
+      },
+      next: {
+        manilaDate: "2026-11-02",
+        reason: { code: "work_override", label: "you marked this as a workday" },
+      },
+      appUrl: APP,
+    });
+    expect(html).toContain("Mon 2 Nov is a day you marked as a workday");
+    expect(html).toContain("clocking in at 06:00");
   });
 });
 
@@ -696,12 +810,25 @@ describe("sweepMissedRuns", () => {
     expect(calls.dispatched).toEqual([]);
   });
 
-  it("weekend or holiday short-circuits before any lookup", async () => {
+  it("a day the Workday gate says to skip alerts nobody", async () => {
+    // The gate is per-user now (phase 16A): a holiday, a weekend, a pause
+    // window or the user's own skip day all short-circuit before any notice.
     const { deps, calls } = makeSweepDeps({ isWorkday: () => false });
     await sweepMissedRuns(deps);
-    expect(calls.loaded).toBe(0);
     expect(calls.inserted).toEqual([]);
     expect(calls.dispatched).toEqual([]);
+  });
+
+  it("hands the gate the user and the Manila day (so it can decide per user)", async () => {
+    const seen: string[] = [];
+    const { deps } = makeSweepDeps({
+      isWorkday: (userId, manilaDate) => {
+        seen.push(`${userId}:${manilaDate}`);
+        return true;
+      },
+    });
+    await sweepMissedRuns(deps);
+    expect(seen).toEqual(["u1:2026-08-10"]);
   });
 
   it("now inside the grace window → nothing", async () => {

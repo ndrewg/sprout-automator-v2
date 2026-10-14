@@ -1,15 +1,14 @@
 import { eq, inArray } from "drizzle-orm";
 import { db } from "../db/client";
-import { credentials, runs, schedules, type Run, type Schedule } from "../db/schema";
+import { credentials, runs, type Run } from "../db/schema";
 import { logger } from "../lib/logger";
 import { pingHeartbeat } from "../lib/heartbeat";
-import { isPausedOn, manilaDateString } from "../lib/ph-holidays";
+import { manilaDateString, decideDay, type DayDecision, type WorkdayReasonCode } from "./workday";
 import { isUniqueViolation } from "../lib/pg-errors";
 import { errorSummary, stripAnsi } from "../lib/text";
 import { onTick } from "../lib/wall-clock-tick";
 import type { ClockAction } from "../automation/clock";
-import { notifyRunFinished } from "./notifications";
-import { resolveHolidayDecision, type HolidayDecision } from "./holidays";
+import { notifyHeadsUp, notifyRunFinished } from "./notifications";
 import {
   currentPolicy,
   cutoffFor,
@@ -82,6 +81,11 @@ export type LifecycleDeps = {
   enqueue: (job: { runId: string }) => void;
   /** The terminal-outcome message (rendered and sent in notifications.ts). */
   notifyRunFinished: typeof notifyRunFinished;
+  /**
+   * The evening heads-up (phase 16D), sent once after a clock-out run reaches
+   * an outcome. Fire-and-forget (hard rule 11).
+   */
+  notifyHeadsUp: typeof notifyHeadsUp;
   /** The dead-man's-switch ping. Fire-and-forget (hard rule 11). */
   pingHeartbeat: () => void;
 };
@@ -89,6 +93,7 @@ export type LifecycleDeps = {
 export const defaultLifecycleDeps: LifecycleDeps = {
   enqueue: (job) => runQueue.enqueue(job),
   notifyRunFinished,
+  notifyHeadsUp,
   pingHeartbeat,
 };
 
@@ -225,6 +230,18 @@ export async function finishRun(
     }).catch(() => {}); // oxlint-disable-line promise/prefer-await-to-then -- sanctioned fire-and-forget idiom (#2), §03.
   }
 
+  // The evening heads-up (phase 16D): ONE message about the next workday's
+  // decision, after a CLOCK-OUT run reaches an outcome — any status. A run that
+  // never happened (missed, or a skip with no run row) sends nothing; the
+  // missed-run alert covers that day. Once per user per Manila day, recorded in
+  // the database, and fire-and-forget so a dead Telegram endpoint can never
+  // change the run's status or timing (hard rule 11).
+  if (updated.action === "out") {
+    void d
+      .notifyHeadsUp({ userId: updated.userId, now: opts.now ?? new Date() })
+      .catch(() => {}); // oxlint-disable-line promise/prefer-await-to-then -- sanctioned fire-and-forget idiom (#2), §03.
+  }
+
   const pinged = params.status !== "failure" || retry !== "retry";
   if (pinged) d.pingHeartbeat();
 
@@ -301,23 +318,23 @@ export async function recoverOrphanedRuns(
 export type RetryFireDeps = LifecycleDeps & {
   /** The creation step a due retry goes through. Injectable so a test can make it fail. */
   createRun: (params: StartRunParams) => Promise<StartRunResult>;
-  /** The holiday decision (cache-first, no network). */
-  resolveHoliday: (now: Date) => Promise<HolidayDecision>;
-  loadSchedule: (userId: string) => Promise<Schedule | undefined>;
+  /**
+   * The Workday gate (phase 16A). One call answers "should this user be clocked
+   * on this Manila day?" — holiday, pause window, weekend and the user's own day
+   * override included — replacing the separate holiday layer and pause probe
+   * this module used to run.
+   */
+  decideDay: (params: {
+    userId: string;
+    manilaDate: string;
+    now?: Date;
+  }) => Promise<DayDecision>;
 };
 
 export const defaultRetryFireDeps: RetryFireDeps = {
   ...defaultLifecycleDeps,
   createRun: (params) => startRun(params),
-  resolveHoliday: resolveHolidayDecision,
-  loadSchedule: async (userId) => {
-    const [row] = await db
-      .select()
-      .from(schedules)
-      .where(eq(schedules.userId, userId))
-      .limit(1);
-    return row;
-  },
+  decideDay,
 };
 
 /**
@@ -413,23 +430,16 @@ async function fireClaimedRetry(
     return;
   }
 
-  // The holiday layer. A skip is a deliberate no-run: the day's holiday notice
-  // (when there is one) already explains it, so nothing more is sent — but the
-  // slot HAS reached an outcome, so the heartbeat pings.
-  const decision = await d.resolveHoliday(now);
-  if (decision.skip) {
+  // The Workday gate (phase 16A): a holiday, a pause window set after the retry
+  // was queued, or the user's own skip day is a deliberate no-run. The day's
+  // skip notice (when there is one) already explains it, so nothing more is
+  // sent here — but the slot HAS reached an outcome, so the heartbeat pings.
+  const decision = await d.decideDay({ userId: run.userId, manilaDate, now });
+  if (!decision.work) {
     logger.info(
-      { runId: run.id, action, holiday: decision.skip.name },
-      "retry cancelled — Philippine holiday",
+      { runId: run.id, action, reason: decision.reason.code },
+      "retry cancelled — the workday gate says today is not a work day",
     );
-    d.pingHeartbeat();
-    return;
-  }
-
-  // A pause set after the retry was queued cancels it (07:00 cancels a 05:30).
-  const schedule = await d.loadSchedule(run.userId);
-  if (schedule && isPausedOn(schedule, now)) {
-    logger.info({ runId: run.id, action }, "retry cancelled — paused window");
     d.pingHeartbeat();
     return;
   }
@@ -489,14 +499,36 @@ export async function cancelPendingRetriesForUser(userId: string): Promise<numbe
   return cancelled;
 }
 
+/**
+ * Cancel every queued retry for a user on one Manila day. Phase 16B calls this
+ * when a day override is set or cleared for TODAY and the new decision is
+ * "skip": the user has just said "do not clock me today", so a retry the
+ * scheduler already promised must not fire against it.
+ */
+export async function cancelPendingRetriesForDay(
+  userId: string,
+  manilaDate: string,
+): Promise<number> {
+  const cancelledIn = await clearPendingRetry(userId, "in", manilaDate);
+  const cancelledOut = await clearPendingRetry(userId, "out", manilaDate);
+  const cancelled = cancelledIn + cancelledOut;
+  if (cancelled > 0) {
+    logger.info(
+      { userId, manilaDate, cancelled },
+      "cancelled pending retries for the day",
+    );
+  }
+  return cancelled;
+}
+
 // --- Deliberate no-run outcomes ------------------------------------------------
 
 /**
- * A slot the scheduler deliberately did not run (a holiday or a pause window).
- * There is no run row, so no `finishRun` — but the slot reached an outcome,
- * which is what the heartbeat means.
+ * A slot the scheduler deliberately did not run (a holiday, a pause window, or
+ * the user's own skip day). There is no run row, so no `finishRun` — but the
+ * slot reached an outcome, which is what the heartbeat means.
  */
-export function noteDeliberateSkip(reason: "holiday" | "pause"): void {
+export function noteDeliberateSkip(reason: WorkdayReasonCode): void {
   logger.debug({ reason }, "scheduled slot deliberately skipped");
   pingHeartbeat();
 }

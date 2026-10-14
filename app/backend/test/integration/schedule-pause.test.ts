@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../../src/db/client";
 import { auditLog, credentials, runs, schedules } from "../../src/db/schema";
 import { encrypt } from "../../src/lib/encryption";
-import { manilaDateString } from "../../src/lib/ph-holidays";
+import { manilaDateString } from "../../src/services/workday";
 import { fireCron } from "../../src/services/scheduler";
 import {
   closeTestServer,

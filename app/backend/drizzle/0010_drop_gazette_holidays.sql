@@ -1,0 +1,1 @@
+DROP TABLE "gazette_holidays" CASCADE;

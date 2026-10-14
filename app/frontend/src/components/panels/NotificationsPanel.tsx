@@ -78,6 +78,7 @@ export function NotificationsPanel() {
   const [notifyOnFailure, setNotifyOnFailure] = useState(true);
   const [notifyOnSkipped, setNotifyOnSkipped] = useState(true);
   const [notifyOnMissed, setNotifyOnMissed] = useState(true);
+  const [notifyHeadsUp, setNotifyHeadsUp] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
@@ -93,6 +94,7 @@ export function NotificationsPanel() {
       setNotifyOnFailure(data.notifyOnFailure);
       setNotifyOnSkipped(data.notifyOnSkipped);
       setNotifyOnMissed(data.notifyOnMissed);
+      setNotifyHeadsUp(data.notifyHeadsUp);
     }
   }, [data]);
 
@@ -111,6 +113,7 @@ export function NotificationsPanel() {
     if (notifyOnFailure !== data?.notifyOnFailure) patch.notifyOnFailure = notifyOnFailure;
     if (notifyOnSkipped !== data?.notifyOnSkipped) patch.notifyOnSkipped = notifyOnSkipped;
     if (notifyOnMissed !== data?.notifyOnMissed) patch.notifyOnMissed = notifyOnMissed;
+    if (notifyHeadsUp !== data?.notifyHeadsUp) patch.notifyHeadsUp = notifyHeadsUp;
     if (Object.keys(patch).length === 0) {
       setMsg("No changes.");
       setSaving(false);
@@ -262,11 +265,24 @@ export function NotificationsPanel() {
                       Missed runs
                     </FieldLabel>
                   </Field>
+                  <Field orientation="horizontal">
+                    <Checkbox
+                      id="notifyHeadsUp"
+                      checked={notifyHeadsUp}
+                      disabled={outcomesDisabled}
+                      onCheckedChange={(v) => setNotifyHeadsUp(v === true)}
+                    />
+                    <FieldLabel htmlFor="notifyHeadsUp" className="font-normal">
+                      Evening heads-up
+                    </FieldLabel>
+                  </Field>
                 </div>
                 <FieldDescription>
                   A missed-run alert means the automation didn't run, not that
                   you weren't clocked in — clocking in by hand still triggers
-                  one.
+                  one. The evening heads-up, sent after your clock-out, names
+                  the next workday so a wrong holiday can be fixed in the
+                  calendar before it matters.
                 </FieldDescription>
               </Field>
             </FieldGroup>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseHhmm } from "../../src/config";
-import { manilaHhmm } from "../../src/lib/wall-clock-tick";
+import { manilaHhmm } from "../../src/services/workday";
 import {
   currentPolicy,
   cutoffFor,

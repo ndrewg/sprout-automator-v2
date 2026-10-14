@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  manilaHhmm,
   onTick,
   stopWallClockTick,
   TICK_MS,
   wallClockLastTickAt,
 } from "../../src/lib/wall-clock-tick";
+import { manilaHhmm } from "../../src/services/workday";
 
 describe("wall-clock tick", () => {
   afterEach(() => {

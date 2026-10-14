@@ -27,6 +27,7 @@ type NotificationSettingsView = {
   notifyOnFailure: boolean;
   notifyOnSkipped: boolean;
   notifyOnMissed: boolean;
+  notifyHeadsUp: boolean;
   configured: boolean; // false until first PUT
   blockedCount: number;
 };
@@ -39,6 +40,7 @@ const EMPTY_VIEW: NotificationSettingsView = {
   notifyOnFailure: true,
   notifyOnSkipped: true,
   notifyOnMissed: true,
+  notifyHeadsUp: true,
   configured: false,
   blockedCount: 0,
 };
@@ -53,6 +55,7 @@ function toView(row: NotificationSettings | undefined): NotificationSettingsView
     notifyOnFailure: row.notifyOnFailure,
     notifyOnSkipped: row.notifyOnSkipped,
     notifyOnMissed: row.notifyOnMissed,
+    notifyHeadsUp: row.notifyHeadsUp,
     configured: true,
     blockedCount: row.blockedCount,
   };
@@ -72,6 +75,7 @@ const putSchema = z
     notifyOnFailure: z.boolean().optional(),
     notifyOnSkipped: z.boolean().optional(),
     notifyOnMissed: z.boolean().optional(),
+    notifyHeadsUp: z.boolean().optional(),
   })
   .strict();
 
@@ -131,6 +135,10 @@ notificationsRouter.put("/", async (req: Request, res: Response) => {
   if (data.notifyOnMissed !== undefined) {
     setObj.notifyOnMissed = data.notifyOnMissed;
     changed.push("notifyOnMissed");
+  }
+  if (data.notifyHeadsUp !== undefined) {
+    setObj.notifyHeadsUp = data.notifyHeadsUp;
+    changed.push("notifyHeadsUp");
   }
 
   if (changed.length === 0) {
@@ -201,6 +209,8 @@ notificationsRouter.put("/", async (req: Request, res: Response) => {
       metadata["notifyOnSkipped"] = data.notifyOnSkipped;
     } else if (f === "notifyOnMissed") {
       metadata["notifyOnMissed"] = data.notifyOnMissed;
+    } else if (f === "notifyHeadsUp") {
+      metadata["notifyHeadsUp"] = data.notifyHeadsUp;
     }
   }
   await recordAudit("notification_settings_updated", {
