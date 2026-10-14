@@ -14,7 +14,7 @@ Everything known-missing that isn't already a phase file, ordered by *when it wi
 > |---|---|---|
 > | [`phase-8-environment-and-limits.md`](./phases/phase-8-environment-and-limits.md) | compose passthrough + `jar` · `AUTH_RATE_LIMIT` 10→30 · real-client-IP keying | §§ 4, 3 (cheap option) |
 > | [`phase-9-runs-history.md`](./phases/phase-9-runs-history.md) | `GET /runs` limit + `hasMore` · dates + Show more · Gmail-only copy | new · § 5 |
-> | [`phase-17-admin-visibility.md`](./phases/phase-17-admin-visibility.md) | `ADMIN_EMAILS` + `requireAdmin` + overview + panel | § 8 |
+> | [`phase-20-admin-visibility.md`](./phases/phase-20-admin-visibility.md) | `ADMIN_EMAILS` + `requireAdmin` + overview + panel | § 8 |
 >
 > **Phase 9 shipped 2026-08-13** (gates 9A/9B/9C green; `[manual]` checks listed in `reviews/`-style handoff outstanding — dates, Show more, live-run polling, 375px, copy readability). § 5 part 1 (the in-app copy) is closed with it; part 2 (the onboarding one-pager) remains a human deliverable.
 >
@@ -101,7 +101,7 @@ State plainly in both: **a missed-run alert means "the automation didn't run", n
 
 **You currently learn a colleague's automation is broken when they tell you.** `users.is_admin` exists, is returned by `publicUser`, and gates nothing (`phase-4-security.md` § 4B.7 sketches it). Minimum useful version: an admin-only read endpoint listing each user's last run per action with status and timestamp. Not impersonation, not credential access — just "whose automation is failing". Rank rises sharply the moment anyone else is using this.
 
-> **Specced but gated 2026-08-12.** Fully written up in `phases/phase-17-admin-visibility.md` (**phase 17**, last in the queue). **Do not build it until a second person has an account** — with one user the overview is a table with one row and zero information. The phase also documents what the summary above understates: `is_admin` is *inert*, so there is currently no way for anyone to become an admin, and the grant mechanism must be built before any admin surface can exist.
+> **Specced but gated 2026-08-12.** Fully written up in `phases/phase-20-admin-visibility.md` (**phase 20** since the 2026-10-14 re-plan, last in the queue). **Do not build it until a second person has an account** — with one user the overview is a table with one row and zero information. The phase also documents what the summary above understates: `is_admin` is *inert*, so there is currently no way for anyone to become an admin, and the grant mechanism must be built before any admin surface can exist.
 
 ## 9. OTP submission via Telegram reply
 
@@ -140,7 +140,7 @@ The host is a ThinkPad E14 Gen 5: 40 GB RAM, 12 threads, 565 GB free — **more 
 
 **What it does *not* fix:** the home ISP and laptop uptime become the dependency, and **Docker Desktop needs a logged-in Windows session** — a Windows Update reboot leaves the stack down until someone logs in, which at 05:30 means a missed run for everyone. That is the largest unattended risk on this host and none of the above addresses it.
 
-> **Promoted to [`phases/phase-16-domain-mail-tunnel.md`](./phases/phase-16-domain-mail-tunnel.md) (2026-08-14)** — **phase 16**, marked operator-led because it starts with a card payment and a Cloudflare dashboard. Its code half (cloudflared in compose, arming `TRUSTED_CLOUDFLARE_PEERS`, the `DEPLOY.md` rewrite) still gets gates.
+> **Promoted to [`phases/phase-19-domain-mail-tunnel.md`](./phases/phase-19-domain-mail-tunnel.md) (2026-08-14)** — **phase 19** since the 2026-10-14 re-plan (the login-dependency risk below is now phase 18's subject), marked operator-led because it starts with a card payment and a Cloudflare dashboard. Its code half (cloudflared in compose, arming `TRUSTED_CLOUDFLARE_PEERS`, the `DEPLOY.md` rewrite) still gets gates.
 
 **What it makes obsolete:** Cloudflare terminates TLS, so `docker-compose.prod.yml` + `Caddyfile` (built for a VPS) are unnecessary in this topology, and `DEPLOY.md` would need rewriting around a tunnel. Keep the Caddy artifacts — they stay correct if a VPS ever happens.
 
@@ -204,6 +204,8 @@ Phase 7's pause window is the workaround, but it requires the user to know in ad
 > **Promoted to [`phases/phase-11-holiday-skip-types.md`](./phases/phase-11-holiday-skip-types.md) (the urgent filter fix) and [`phases/phase-13-holiday-sourcing.md`](./phases/phase-13-holiday-sourcing.md) (overrides + the Gazette layer), 2026-08-14 — and it is no longer theoretical: a real scheduled run clocked the operator in on a holiday.** Investigation found a bigger, closer defect sitting in front of this one: `lib/ph-holidays.ts:11` skips only `public` and `bank`, but `date-holidays` types Philippine **special (non-working) days** as `optional`, so **eight days in 2026** were treated as ordinary workdays — including **Ninoy Aquino Day, 2026-08-21**. Worse for the long run: the library gives Eid al-Fitr 2026 as a *computed* `2026-03-20`, while the Philippines proclaims Eid after the moon sighting, routinely a day either side — so when they disagree you get a skip on a working day **and** a clock-in on the real holiday. That is the case no bundled dataset can ever get right, and the reason the phase adds an Official Gazette layer that may only ever *add* a skip, never cancel one.
 >
 > **✅ CLOSED (code, 2026-08-24) — phase 13 shipped.** `EXTRA_HOLIDAYS` operator overrides + a nightly Official Gazette advisory cache (additive-only, cache-first, never on the critical path) cover proclamation days and the lunar-date disagreement. The `[manual]` proof (a real proclamation day + the next Eid) waits on the human; the code is committed and gated.
+>
+> **Revised 2026-10-14 — the Gazette layer is being removed (phase 16).** officialgazette.gov.ph sits behind a Cloudflare bot challenge, so the cache never held a row. Proclamation days and the Eid disagreement are now handled by a **per-user day calendar** (skip / work anyway) plus an **evening heads-up** naming the next workday decision: the human is the cross-check, the night before. See the revised D9.
 
 ## 19. No frontend error boundary
 

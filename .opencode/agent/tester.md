@@ -101,6 +101,8 @@ Anything the phase file deliberately deferred must be **absent** from the diff. 
 - **C** — **what you could not verify and why.** This is the section the reviewer reads hardest, so be specific: live HRHub, a real Telegram delivery, a real mailbox, a browser at 375 px, GitHub Actions, a real Cloudflare Tunnel — none are reachable from here. Listing them honestly is more useful than a confident summary.
 - **D** — a `[manual]` table of checks **only a human can do**, each with the exact command or click sequence and what a pass looks like. **Leave the results column empty.** Carry forward any unfilled rows from earlier rounds.
 
+- **🆕 LATEST, UP-TO-DATE TECH, CODE AND REFERENCES (mandatory, 2026-10-14).** Probe for it: an API used the old or deprecated way, a new dependency not at its latest stable release, or a citation to outdated docs is a finding in your addendum. See `AGENTS.md` hard rule 1, "LATEST, UP-TO-DATE TECH": check today's date, fetch current docs (Context7, then official docs) before every library API, add new dependencies at the latest stable release (within the pnpm cooldown), report outdated dependencies instead of silently bumping them, and current docs beat any outdated version named in a spec (except the verbatim `rebuild/reference/*` code).
+
 ## Hard limits
 
 - **Do not fix anything.** Findings go back to the coder; the reviewer commits. If you catch yourself writing a fix, stop and write a finding instead.

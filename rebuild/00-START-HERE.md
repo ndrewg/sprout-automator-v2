@@ -28,6 +28,7 @@ The always-on rules live in **[`AGENTS.md`](./AGENTS.md)** (opencode and Claude 
 4. **Prescribe, never brainstorm.** These docs deliberately state *the one correct way* to do each thing. If the model proposes an alternative ("should I use JWT instead of DB sessions?"), the answer is no — the decision is already made in [`02-DECISIONS-AND-ARCHITECTURE.md`](./02-DECISIONS-AND-ARCHITECTURE.md). Redirect it.
 5. **Reproduce, don't regenerate, the brittle code.** The HRHub selectors, the encryption byte-format, and the OTP regex in `reference/` are copy-paste-ready and were paid for in debugging time. They get used **verbatim**.
 6. **Fetch live docs, don't trust memory.** Much of this stack post-dates most training cutoffs. See [`reference/live-docs-and-mcp.md`](./reference/live-docs-and-mcp.md) — this rule survived the move to a bigger model unchanged, because a newer model is confidently wrong about a new library in exactly the same way an older one is.
+7. **🆕 Latest, up-to-date tech, code and references. Mandatory (operator, 2026-10-14).** Every agent checks today's date, writes against current docs for the installed version, adds new dependencies at the latest stable release, and reports (doesn't silently bump) outdated ones. Current docs beat any outdated version or API named in these specs. Full rule: `AGENTS.md` hard rule 1.
 
 ---
 
@@ -89,9 +90,12 @@ Read the foundation docs in order once, then work the phases.
 - [`phases/phase-12-durability-and-observability.md`](./phases/phase-12-durability-and-observability.md) ✅
 - [`phases/phase-13-holiday-sourcing.md`](./phases/phase-13-holiday-sourcing.md) ✅
 - [`phases/phase-14-retry.md`](./phases/phase-14-retry.md) ✅
-- [`phases/phase-15-post-run-remediation.md`](./phases/phase-15-post-run-remediation.md) — **next**: the gazette read must degrade instead of throwing, the suite leak, durable retries, the Gazette URL in config
-- [`phases/phase-16-domain-mail-tunnel.md`](./phases/phase-16-domain-mail-tunnel.md) — 🧑 **operator-led**: domain, Resend, a named Cloudflare Tunnel, arming the phase 8 trusted-peer gate
-- [`phases/phase-17-admin-visibility.md`](./phases/phase-17-admin-visibility.md) — admin role + overview. **Last: needs a second user account**
+- [`phases/phase-15-run-lifecycle.md`](./phases/phase-15-run-lifecycle.md): **next**. One Run lifecycle module (D20), durable retries, no silent paths, `SCHEDULER_ENABLED`, a trustworthy suite baseline
+- [`phases/phase-16-workday-gate-and-calendar.md`](./phases/phase-16-workday-gate-and-calendar.md): one Workday gate, the Gazette removed, a per-user skip/work-anyway calendar, the evening heads-up
+- [`phases/phase-17-verify-against-hrhub.md`](./phases/phase-17-verify-against-hrhub.md): an HRHub portal seam, read the card before and after acting, OUT needs IN, "unknown" never retried, OTP anchored to the request
+- [`phases/phase-18-host-and-outside-alerting.md`](./phases/phase-18-host-and-outside-alerting.md): 🧑 **operator-led**. Laptop reliability, a healthchecks.io dead-man's switch, backups off the machine
+- [`phases/phase-19-domain-mail-tunnel.md`](./phases/phase-19-domain-mail-tunnel.md): 🧑 **operator-led**. Domain, Resend, a named Cloudflare Tunnel, arming the phase 8 trusted-peer gate
+- [`phases/phase-20-admin-visibility.md`](./phases/phase-20-admin-visibility.md): admin role + overview. **Last: needs a second user account**
 
 **Reference (attach to a phase when it says so; reproduce these verbatim):**
 - [`reference/testing-strategy.md`](./reference/testing-strategy.md) — **executable gates; attach to every phase from 6 onward**

@@ -74,7 +74,7 @@ Everything else in phase 8 is verified live: `AUTH_RATE_LIMIT=15` → 16th reque
 
 Five `[manual]` rows, and **row 1 gates the rest**: restore a backup into a scratch DB, `pnpm db:migrate` **from empty**, and diff tables/indexes/constraints against live `sprout`. That is the only check that catches a migration runner silently skipping older migrations after the nine-minor Drizzle upgrade — and **three migrations (`0005`, `0006`, `0007`) now sit unapplied on top of that unverified base.**
 
-`phases/phase-15-post-run-remediation.md` promotes it to *its* row 1 for exactly this reason. **Do not apply those migrations to a database holding real encrypted credentials until it passes.** Tag 10 after phase 15's manual table is filled in, not before.
+`phases/phase-15-run-lifecycle.md` (re-planned 2026-10-14) promotes it to *its* row 1 for exactly this reason. **Do not apply those migrations to a database holding real encrypted credentials until it passes.** Tag 10 after phase 15's manual table is filled in, not before.
 
 ### 11 — the real check is a date
 
@@ -94,7 +94,7 @@ Row 9 is the one to not skip. Row 6 only proves the *ping* fires; it cannot tell
 
 `EXTRA_HOLIDAYS=<tomorrow>` and `EXTRA_HOLIDAYS=2026-02-31=Nope` (must refuse to boot) are checkable today. The two that matter are not: a **real proclamation day** skipping and being named in the notification, and the **next Eid** skipping on the *proclaimed* date rather than the library's computed one — the case no bundled dataset can get right.
 
-Also worth doing early: block outbound access to the Gazette and confirm a run completes anyway. Phase 15 § 15A exists because a missing gazette **table** currently throws instead of degrading; verify the *network* path separately from that fix.
+Also worth doing early: block outbound access to the Gazette and confirm a run completes anyway. (Superseded 2026-10-14: phase 16 removes the Gazette layer entirely.) Phase 15 § 15A existed because a missing gazette **table** throws instead of degrading; verify the *network* path separately from that fix.
 
 ### 14 — needs an outage you can create
 
@@ -102,7 +102,7 @@ Point `SPROUT_URL` at an unreachable host, let a scheduled run fire, and confirm
 
 **Row 6 is the one to be most suspicious of:** force a `skipped` run (already clocked in) and confirm **no retry is scheduled at all**. That constraint is what stops a fail-safe verification skip turning into repeated clock attempts — the double-clock the partial unique index exists to prevent.
 
-Note the standing limitation while you test: pending retries live in memory, so a container restart drops them. Phase 15 § 15C fixes that; until then, don't restart mid-window and conclude the feature is broken.
+Note the standing limitation while you test: pending retries live in memory, so a container restart drops them. Phase 15 § 15B (re-planned 2026-10-14) fixes that; until then, don't restart mid-window and conclude the feature is broken.
 
 ---
 

@@ -42,6 +42,8 @@ Section **A** is structural work already done — **confirm, do not repeat it.**
 
 **On a clean review the only files you may edit are the ledger:** `rebuild/STATE.md`, `rebuild/BACKLOG.md`, `rebuild/TAGS.md`, and dated as-built notes inside the phase file. Correcting a wrong fact in one of those — a bad commit hash, a stale claim — is in scope; changing behaviour is not.
 
+- **🆕 LATEST, UP-TO-DATE TECH, CODE AND REFERENCES (mandatory, 2026-10-14).** Verify it yourself against current docs before approving; outdated APIs or dependencies added below latest stable block the commit like a failing gate. See `AGENTS.md` hard rule 1, "LATEST, UP-TO-DATE TECH": check today's date, fetch current docs (Context7, then official docs) before every library API, add new dependencies at the latest stable release (within the pnpm cooldown), report outdated dependencies instead of silently bumping them, and current docs beat any outdated version named in a spec (except the verbatim `rebuild/reference/*` code).
+
 ## Look specifically for
 
 - a secret in a log line, response body, error message or audit row

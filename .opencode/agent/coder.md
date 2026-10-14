@@ -56,6 +56,7 @@ Integration and e2e need Postgres: `docker compose up -d postgres`. Before e2e, 
 
 ## Traps this project has actually fallen into
 
+- **🆕 LATEST, UP-TO-DATE TECH, CODE AND REFERENCES (mandatory, 2026-10-14).** Write every line against the current API of the installed version, never from memory. See `AGENTS.md` hard rule 1, "LATEST, UP-TO-DATE TECH": check today's date, fetch current docs (Context7, then official docs) before every library API, add new dependencies at the latest stable release (within the pnpm cooldown), report outdated dependencies instead of silently bumping them, and current docs beat any outdated version named in a spec (except the verbatim `rebuild/reference/*` code).
 - **Post-cutoff stack.** Express 5, Postgres 18, Drizzle, Playwright 1.60, pnpm 11, React 19, Tailwind 4, TanStack Query v5, Vite 8, TS 6. **Fetch current docs via Context7** for any API you are not certain of. If docs contradict memory, docs win.
 - **A new config key must land in `config.ts`, `.env.example` AND both compose files in the same gate.** An entire phase existed because seven keys reached `.env` and never reached the container.
 - **Never edit or regenerate a committed migration.** If a tool wants to rewrite `drizzle/`, stop and ask.

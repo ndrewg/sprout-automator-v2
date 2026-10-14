@@ -18,7 +18,7 @@ Sprout HRHub requires a fresh email OTP on most logins, which makes a naive cron
 ## The core automation flow (what actually happens at 5:30 AM)
 
 ```
-node-cron fires (Mon–Fri, Asia/Manila, per-user time)
+wall-clock tick finds a due slot (Mon–Fri, Asia/Manila, per-user time)
   └─ holiday check (skip if PH public/bank holiday)
   └─ startRun(userId, action)
         ├─ INSERT runs row (status='pending')   ← DB unique index = "one active run per user"

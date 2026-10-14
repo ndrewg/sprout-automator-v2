@@ -36,6 +36,7 @@ Handoff report ─ paste ─▶           writes the addendum ─ paste ─▶  
 > **How to work:**
 > - **All architecture is already decided.** Do not redesign, do not propose alternatives, do not "improve" the stack. If you think a decision is wrong, say so in one sentence in the report's *Spec divergences* section, and implement it as specified anyway.
 > - **If the spec is ambiguous or missing something, stop and ask one specific question.** Do not invent. The spec has been wrong before; a question costs minutes, a wrong guess costs the phase.
+> - **🆕 LATEST, UP-TO-DATE TECH, CODE AND REFERENCES (mandatory).** Check today's date; fetch current docs before every library API; new dependencies at latest stable (within the pnpm cooldown); report outdated ones instead of silently bumping; current docs beat outdated spec versions. Full rule: `AGENTS.md` hard rule 1.
 > - **Fetch live docs via Context7 for any library API you are not certain of.** Some of this stack post-dates your training, and vitest's config API in particular has changed across recent majors. If docs contradict memory, docs win.
 > - **Reproduce anything marked "copy verbatim" exactly.**
 > - **Do not add dependencies** without the phase file calling for it. Each one is supply-chain surface.

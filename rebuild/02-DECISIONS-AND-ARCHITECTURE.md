@@ -74,20 +74,34 @@ Two *independent* mechanisms solving two *different* problems — do not merge t
 - **Startup orphan recovery:** on boot, mark any leftover `pending`/`running` rows as `failure` with `error = "Interrupted by server restart"` — otherwise the unique index blocks that user forever, and the restart is invisible to them.
 - The queue executor is registered **once at startup**. Routes call `startRun`/`enqueue`, never `runAutomation` directly. HTTP responds `202` immediately; the client polls `GET /runs/:id`.
 > ⚠️ **As-built (found 2026-08, phase T):** originally specified as "registered at module load, importing `services/runs.ts` for its side effect". It is now registered explicitly in `index.ts` `start()` (`runQueue.setExecutor(executeQueuedRun)`), before `listen`. Reason: `app.ts` is imported by route tests and transitively imports `services/runs` via `routes/runs`, so module-load registration would arm the executor inside tests — a route test could launch Chromium. Registering in the startup path achieves the original intent (exactly once, before serving) without that side effect. **Consequence to remember:** any entry point that enqueues runs without going through `start()` has a queue with no executor, so runs would sit `pending` forever. There is only one such entry point today (`index.ts`); keep it that way.
+> **Revised 2026-10-14 (architecture review → phase 15):**
+> - **Orphan recovery goes through the Run lifecycle (D20).** The interrupted run is notified and retried like any other failure. Before, it was marked failed silently, and because a run row now existed, both the slot re-fire and the missed-run sweep stayed quiet.
+> - **Pending-retry state moves to the database** (`runs.retry_at`). The queue itself stays in memory, for the reason above: nothing tries to resume a dead browser. What must survive a restart is the *intent to retry*, not the browser.
 
 ### D7 — OTP via Gmail IMAP App Password, racing a manual paste fallback
 - OTP retrieval polls **Gmail IMAP** (`imap.gmail.com:993`, TLS) using the user's **App Password** — not OAuth. OAuth pushes Google Cloud Console + consent-screen review onto the operator; App Passwords push ~5 minutes of one-time setup onto the user and then never expire. For ≤50 colleagues this is the right trade.
 - The executor **races** `pollForOtp` (IMAP) against `waitForOtp` (manual `POST /runs/:id/otp`) with `Promise.any`; first to resolve wins, the loser is aborted (`AbortController` for IMAP, `cancelWait` for the bridge).
 - IMAP search: messages `SINCE` now − 5 min (epoch math), newest 5 UIDs, parse MIME with `mailparser` (base64/HTML bodies otherwise hide the digits), extract code with regex **`(?<!\d)(\d{4,6})(?!\d)`** preferring 5-digit matches. Poll every 5 s up to a 5-min deadline.
 - `POST /credentials/test-imap` does connect → select INBOX → logout and returns `{ ok, messageCount }` or a **humanized** error (raw imapflow errors leak internals). All IMAP code lives in `src/lib/imap-otp.ts`; don't import `imapflow` elsewhere.
+> ⚠️ **Corrected 2026-10-14 (→ phase 17 § 17C):**
+> - **"`SINCE` now − 5 min" was never true.** IMAP `SINCE` has **day** precision (RFC 3501), and nothing filtered by received time afterwards, so the effective window was "all of today". A slow OTP mail let a 16:15 run pick up the 05:30 code.
+> - **Rule now:** discard any message whose `internalDate` is earlier than the OTP request instant minus 60 s.
+> - **Sprout's sender only.** The any-sender fallback is removed; a missing Sprout mail fails the run with a message that names the cause.
 
-### D8 — Per-user node-cron scheduler, lazy opt-in, Manila + Mon–Fri
-- Each enabled `schedules` row registers **two** `node-cron` tasks (in + out), pinned to **`Asia/Manila`** via cron's `timezone` option, firing **Mon–Fri** via the cron expression's `1-5` field (weekday filtering is in the expression, *not* the handler).
-- `timeToCronExpression("05:30")` → `"30 5 * * 1-5"`.
+### D8 — Per-user scheduler on a wall-clock tick, lazy opt-in, Manila + Mon–Fri
+> **Revised 2026-10-13: node-cron is gone.** The original D8 registered two `node-cron` tasks per user. node-cron v4 sleeps on one `setTimeout` per slot (up to 24 h), and on the scheduled host (Docker Desktop's WSL2 VM) the monotonic clock that timers run on drifts against the NTP-synced wall clock: ~57 s/day measured on 2026-10-07, ~450 s/day on 2026-10-13, changing hour to hour. A late wake past node-cron's tolerance drops the slot silently. Daily runs were lost 2026-09-14 → 10-07, and a 20-minute tolerance still lost 10-13's clock-in, which woke 26 min 48 s late. **Rule now: nothing in this app may sleep on a long timer to hit a wall-clock time.** Every time-of-day job compares `new Date()` against what is due, on a short tick.
+- **One shared tick** (`lib/wall-clock-tick.ts`): a single `setInterval` every **15 s** calls each registered handler with the current wall-clock instant. A late tick delays a job by seconds and can never skip it. Its consumers are the daily slots, one-shot retries (`retry-registry.ts`), the missed-run sweep (first tick of each 5-minute window), and the 03:00 Gazette refresh. `/health` reports `scheduler.lastTickAt`.
+- Each enabled `schedules` row is **registered** in memory (`registerSchedule`). On every tick, `dueSlots()` (pure, tested) returns the slots that are due: a **Mon–Fri** day in **`Asia/Manila`**, from the slot's wall time up to `MISSED_RUN_GRACE_MINUTES` after it, not already fired today. Each slot fires **once per day**. Before firing, a DB check skips the slot if a run for that user and action already started at or after it (the user clicked first, or a restarted process already fired it).
+- The fire window equals the missed-run grace window on purpose: once the window has passed, the sweep has already alerted the slot as missed. A schedule edited to a time that passed less than one window ago fires on the next tick.
 - **Lazy opt-in:** new users get **no schedule row.** `GET /schedule` returns sensible defaults (05:30 / 18:05) with `configured:false, enabled:false`. Only `PUT /schedule` creates a row. Rationale: never auto-clock someone who hasn't explicitly opted in.
-- Mutations cancel + re-register the user's tasks atomically (`registerSchedule` calls `unregisterSchedule` first). Boot calls `loadAllSchedules()` to rehydrate enabled rows.
-- The cron handler **never throws across the boundary** (log and continue), **doesn't await execution** (fires "intent"; the queue owns "actual clocking"), and does the **holiday check at fire time** (not at registration — so a holiday-data update doesn't require re-registering).
-- In-process cron means a dead process drops that day's firings; the next day is recovery. Acceptable for daily attendance.
+- Mutations re-register the user's schedule atomically (`registerSchedule` calls `unregisterSchedule` first). Boot calls `loadAllSchedules()` to rehydrate enabled rows, then `startScheduler()`.
+- The fire path (`fireCron`) **never throws across the boundary** (log and continue), **doesn't await execution** (fires "intent"; the queue owns "actual clocking"), and does the **holiday and pause checks at fire time** (not at registration — so a holiday-data update doesn't require re-registering).
+- An in-process scheduler means a dead process drops that day's firings. A process that comes back inside a slot's window still fires it; otherwise the next day is recovery. Only an external heartbeat (`HEARTBEAT_URL`) can report a dead process.
+> **Revised 2026-10-14 (architecture review → phase 15):**
+> - **A slot counts as fired once it has a run or a deliberate skip, not when the tick picks it up.** If the fire path fails before either exists (a database error, a thrown decision), the next tick tries again until the window closes. Before this, one database error at 05:30:00 lost the day silently.
+> - **One host schedules.** `SCHEDULER_ENABLED` (boolean, **default false**) gates `startScheduler()`. Only the laptop sets it. The work PC and any second machine never clock anyone by accident, because separate databases mean separate unique indexes, so two scheduling hosts would both clock.
+> - **Late wake: alert only.** A host that comes up after the window doesn't clock in late. The missed-run message tells the user to clock in themselves if they're working. **Why:** the operator pauses by powering off, so the app can't tell "overslept" from "on leave and just booted"; a late automatic clock-in would put a false record on days off.
+> - **The heartbeat pings on outcome** (success, deliberate skip, give-up) from the Run lifecycle (D20), not on fire. An outside monitor then proves "today's slot was handled", not "the tick ran". The setup is phase 18.
 
 ### D9 — PH holiday skip via the `date-holidays` package (not a hardcoded list)
 - Holiday lookup uses `new Holidays("PH")`. Holidays of type `"public"` or `"bank"` trigger a skip; observances are ignored.
@@ -95,6 +109,19 @@ Two *independent* mechanisms solving two *different* problems — do not merge t
 - `isPhilippineHoliday(date?)` checks `EXTRAS` first, then the library. `manilaDateString(date)` formats the date in Asia/Manila via `Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila" })`.
 - All holiday logic lives behind `src/lib/ph-holidays.ts`; don't import `date-holidays` elsewhere.
 > ⚠️ This supersedes the original "hardcoded 2025–2027 maps" approach. Use `date-holidays`.
+
+> **Revised 2026-10-14 (architecture review → phase 16). The question is now "is this a workday for this user?", answered by one Workday gate module.**
+> - **The Gazette layer (phase 13B) is removed.** officialgazette.gov.ph is behind a Cloudflare bot challenge (403 "Just a moment…", even with browser headers). `gazette_holidays` never held a row; it was dead weight that looked like coverage.
+> - **No second automatic source.** Google's public PH holiday feed was evaluated and rejected:
+>   - It labels nearly everything "Public holiday", with no regular/special or national/regional split.
+>   - It lists Mawlid nationally on 08-26 where the library has an observance on 08-25.
+>   - It's undocumented and could change or vanish.
+>
+>   The **human is the cross-check**: an evening heads-up names the next workday decision, and a calendar lets the user flip it.
+> - **Per-user day overrides** (`day_overrides`): **skip** (leave, an intended miss) or **work anyway** (a holiday the user works), set from a calendar in the Schedule panel and stored in the database. Holiday data can now be corrected in both directions, per person, without a restart. `EXTRA_HOLIDAYS` stays as the company-wide add-a-skip override.
+> - **Precedence:** user day override > pause range > weekend > `EXTRA_HOLIDAYS` > library holiday of a skipping type (`public`, `bank`, `optional`; phase 11).
+> - **Every skip notifies**, including plain library holidays. The old "a public holiday stays silent" rule hid wrong library dates. `notify_on_skipped` is the mute.
+> - **The gate never throws.** Any read error degrades to library plus weekend and logs once. It owns the Manila clock helpers; no other module computes Manila dates or weekdays.
 
 ### D10 — HTTP hardening: Helmet strict CSP + rate limits + trust proxy + body cap
 - **Helmet** with a strict CSP: `default-src 'self'`, `script-src 'self'` (no inline scripts), `style-src 'self' 'unsafe-inline'` (shadcn needs inline styles), `img-src 'self' data:`, `connect-src 'self'`, `font-src 'self' data:`, `object-src 'none'`, `base-uri 'self'`, `frame-ancestors 'none'`, `form-action 'self'`. HSTS max-age 1y, includeSubDomains.
@@ -115,6 +142,9 @@ Two *independent* mechanisms solving two *different* problems — do not merge t
 - Two containers via `docker-compose.yml`: `postgres:18-alpine` + the backend (built on the Playwright base image). A prod overlay adds a `caddy:2-alpine` container for automatic Let's Encrypt TLS, and stops exposing the backend port publicly.
 - Backend Dockerfile is multi-stage: a `node:22-alpine` stage builds the frontend with pnpm → its `dist` is copied into the runtime image's `./public`; the runtime stage is `mcr.microsoft.com/playwright:v1.60.0-noble`, runs as non-root `pwuser`, and starts with `pnpm exec tsx src/index.ts`.
 - Daily `pg_dump` backups; off-host encrypted copies recommended.
+> ⚠️ **As-built reality, recorded 2026-10-14 (→ phase 18).** The VPS was never deployed. The scheduled host is a **Windows work laptop** running Docker Desktop (WSL2). It sleeps, Docker starts only after an interactive login, Windows Update reboots leave it at the login screen, and a second machine (the work PC) runs the same app with its own database. This decision was never re-derived for that host. The 2026-09/10 clock-drift misses and the 11-hour-late missed-run alert of 09-28 are both consequences.
+> - **Decided:** the long-term host is **undecided**. Keep the laptop, made as reliable as it can be (phase 18), and keep the deployment host-agnostic (compose plus `.env`, nothing laptop-specific in code), so moving means following this decision's original runbook.
+> - **Move to an always-on host when any one of these holds:** a second user depends on it; the host causes more than one missed day a month; or phase 19's tunnel goes live.
 
 ### D13 — Express 5 (async errors reach the error handler)
 - Use **Express 5**, not 4. Express 5 awaits async route handlers and routes a rejected promise to the error-handling middleware. On Express 4, a `throw` inside an `async` handler is an unhandled rejection — it bypasses the global error handler and, under Node's default, can terminate the process. Several handlers legitimately throw (e.g. signup rethrowing a non-`23505` DB error, `if (!row) throw`), so this is a real correctness fix, not cosmetic.
@@ -154,6 +184,18 @@ Two *independent* mechanisms solving two *different* problems — do not merge t
 - Phases 0–5 gates were shell commands whose output a **human** interpreted (fire five requests and count the 202s; check a response "isn't instant"). That model breaks once an agentic loop is the implementer: asked whether a prose gate passed, a model with nothing to run will reason about whether the code *ought* to pass and report success — not dishonesty, just no other signal.
 - From phase 6 on, **a gate is a command with an exit code**, and checks genuinely needing a human are marked `[manual]`. The properties that most need this are the invisible ones — the `23505` race guard, tenant isolation, "no secret in this response" — which fail silently and correctly-looking.
 - **HRHub automation stays untestable** and that is accepted: the selectors run against a third party we cannot stage, so a fixture only proves the code matches our *belief* about HRHub. Drift detection remains screenshots plus a vision model. Everything else is automated so that when something breaks, drift is the only remaining suspect. Full spec: `reference/testing-strategy.md`.
+> **Refined 2026-10-14 (→ phase 17).** The *selectors* stay untestable. The *safety decisions* don't. Those are: read the card before acting; read it again after; an OUT needs today's IN; an unreadable card or an unconfirmed click means "unknown", which is never auto-retried. They move above an HRHub portal seam with two adapters (Playwright in production, a scripted fake in tests) and are unit-tested. Before this, every test mocked the whole of `runAutomation`, so the rules that prevent double clocks and half records had no test at all.
+
+### D20 — One Run lifecycle module owns every run transition
+- **Added 2026-10-14** by the architecture review (`improve-codebase-architecture`, two independent agents, findings verified in the code). Implemented in phase 15.
+- **The defect it fixes:** run state was spread across seven modules: scheduler, runs, run-queue, retry, retry-registry, notifications and holidays. There were two ways to create a run and three writers of a final status, two of which skipped the retry and the notification. Each silent path found (restart mid-run, restart with a retry pending, a failed retry insert, a database error on the first tick) traced back to that.
+- **Rule:**
+  - Every trigger (scheduled slot, retry, manual click) **creates** a run through one module.
+  - Every ending (normal finish, executor backstop, orphan recovery) goes through its one terminal step, which records the status, decides the retry, picks the message and pings the heartbeat.
+  - Rendering and sending stay in `services/notifications.ts`; the queue (D6) stays a Chromium cap.
+- **Retry state is durable:** a nullable `runs.retry_at` on the failed run. The tick claims due retries atomically. All existing guards (cap, cutoff, holiday, pause, day rollover) re-apply after a restart; a retry past its cutoff becomes a give-up, never a late clock. One column, no table, because a pending retry is a property of the latest failed attempt.
+- **"Unknown" is an outcome** (phase 17): the app couldn't confirm what HRHub did after clicking. It is recorded and alerted, and **never auto-retried**. Retries are only for failures known to have happened before the click.
+- **Invariant to protect:** "a run row exists for this slot" must mean "this slot was handled". The scheduler's re-fire check and the missed-run sweep both rely on it. It holds only if every write of a final status goes through the lifecycle.
 
 ---
 
@@ -165,7 +207,7 @@ Two *independent* mechanisms solving two *different* problems — do not merge t
    Browser ──TLS─┤  Caddy (prod only) ──▶ Backend (Express, tsx)       │
                  │                          ├─ static SPA (./public)   │
                  │                          ├─ JSON API (/auth …)      │
-                 │                          ├─ node-cron (in-process)  │
+                 │                          ├─ wall-clock tick (15 s)  │
                  │                          ├─ RunQueue (in-memory)    │
                  │                          └─ Playwright Chromium ×N  │
                  │                                   │                  │
@@ -210,7 +252,7 @@ app/backend/src/
 ├── services/
 │   ├── run-queue.ts         # RunQueue class + recoverOrphanedRuns
 │   ├── runs.ts              # startRun + executeQueuedRun (+ registers executor) + list/get/otp
-│   └── scheduler.ts         # node-cron register/unregister/load + fireCron
+│   └── scheduler.ts         # register/unregister/load + dueSlots + tick + fireCron
 └── routes/
     ├── auth.ts              # /auth/*
     ├── credentials.ts       # /credentials/* (incl. test-imap)

@@ -37,14 +37,18 @@ You are the **orchestrator** of the Sprout Automator rebuild. You do not write c
 
 Then establish where you actually are: `git log --oneline -15` and `git status`. **A phase is done when a commit exists for it, not when a report says so.** STATE.md plus git history is your resume state — there is no separate execution log, and do not create one.
 
+- **🆕 LATEST, UP-TO-DATE TECH, CODE AND REFERENCES (mandatory, 2026-10-14).** Put this requirement verbatim in every coder, tester and reviewer prompt you send. See `AGENTS.md` hard rule 1, "LATEST, UP-TO-DATE TECH": check today's date, fetch current docs (Context7, then official docs) before every library API, add new dependencies at the latest stable release (within the pnpm cooldown), report outdated dependencies instead of silently bumping them, and current docs beat any outdated version named in a spec (except the verbatim `rebuild/reference/*` code).
+
 ## Mode: autonomous, with hard stops
 
 Work the queue in order without pausing for approval between phases. You cannot ask questions interactively; when you need the human, **stop and report**.
 
 **Stop for these, and only these:**
 
-- **Phase 16 (Domain, mail & tunnel).** It is marked 🧑 **operator** in the queue. It begins with a card payment and a Cloudflare dashboard. **Never attempt it.** Report that the queue has reached it and stop.
-- **Phase 17 (Admin visibility).** Blocked on a second user account existing, which is blocked on phase 16. Do not build a one-row admin table.
+- **Phase 17's card snapshot.** § 17B needs a redacted snapshot of HRHub's attendance card from the operator. If none is in the repo, build everything else and stop for it.
+- **Phase 18 (Host reliability & outside alerting).** Marked 🧑 **operator**. Do only § 18D (code and docs), then report and stop. Never touch Windows settings, Task Scheduler or third-party accounts.
+- **Phase 19 (Domain, mail & tunnel).** It is marked 🧑 **operator** in the queue. It begins with a card payment and a Cloudflare dashboard. **Never attempt it.** Report that the queue has reached it and stop.
+- **Phase 20 (Admin visibility).** Blocked on a second user account existing, which is blocked on phase 19. Do not build a one-row admin table.
 - **A coder that asks a question.** The coder is instructed to stop and ask exactly one specific question rather than invent. That is correct behaviour and has twice saved a phase. **Never answer it yourself and never let it guess** — relay it to the human verbatim and stop.
 - **The fix-round cap** (below).
 - **Anything that would change locked scope** — a decision recorded in `rebuild/02-DECISIONS-AND-ARCHITECTURE.md` or deliberately deferred in `BACKLOG.md`.
