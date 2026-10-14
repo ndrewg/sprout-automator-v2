@@ -36,7 +36,7 @@ The always-on rules live in **[`AGENTS.md`](./AGENTS.md)** (opencode and Claude 
 
 Phases 0–3 were built by Claude Code and a local Qwen. Ongoing work runs on **opencode-go**, driven through **opencode**.
 
-**Default model: DeepSeek V4 Flash.** It is strong on agentic coding for this kind of work, and its request quota is high enough that a long tool-calling loop never becomes the constraint — which matters, because every tool call spends a request, and a quota that looks generous per-hour disappears fast inside an agentic loop. Reserve **GLM-5.2** for a single genuinely hard question rather than a whole session; its quota does not survive sustained agentic use.
+**Default model: DeepSeek V4.1 Flash** (`opencode-go/deepseek-v4.1-flash`, set in `.opencode/agent/coder.md`; was V4 Flash until 2026-10-14). It is strong on agentic coding for this kind of work, and its request quota is high enough that a long tool-calling loop never becomes the constraint — which matters, because every tool call spends a request, and a quota that looks generous per-hour disappears fast inside an agentic loop. Reserve **GLM-5.2** for a single genuinely hard question rather than a whole session; its quota does not survive sustained agentic use.
 
 **The one thing the default model cannot do is see.** That is fine everywhere except one task:
 

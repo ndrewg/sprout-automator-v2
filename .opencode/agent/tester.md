@@ -9,6 +9,12 @@ permission:
   grep: allow
   bash:
     "*": allow
+    "docker compose down*": deny
+    "docker compose rm*": deny
+    "docker rm*": deny
+    "docker volume rm*": deny
+    "docker system prune*": deny
+    "docker volume prune*": deny
     "git commit*": deny
     "git add*": deny
     "git push*": deny
@@ -45,9 +51,9 @@ cd app/backend  && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integra
 cd app/frontend && pnpm lint && pnpm test && pnpm build && pnpm exec playwright install chromium && pnpm test:e2e
 ```
 
-Postgres must be up: `docker compose up -d postgres`. **Confirm the counts, not just green** — read the current baseline out of `rebuild/STATE.md`, not from a fixed number here. **The old 161/106/5/16 figure is stale**; the last recorded count (phase 14, 2026-08-24) was 225 backend unit / 150 backend integration / 5 frontend unit / 16 e2e, and STATE.md's Known gaps section flags even that as provisional until phase 15 §15B re-establishes it from cold. A count that went *down* from whatever STATE.md currently says is a finding.
+Postgres must be up: `docker compose up -d postgres`. **Confirm the counts, not just green** — read the current baseline out of `rebuild/STATE.md`, not from a fixed number here. **The old 161/106/5/16 figure is stale**; the last recorded count (2026-10-13) was 242 backend unit / 150 backend integration / 5 frontend unit / 16 e2e, and STATE.md's Known gaps section flags even that as provisional until phase 15 §15E re-establishes it from cold. A count that went *down* from whatever STATE.md currently says is a finding.
 
-If you touch the container, use `--build` when source changed and `--force-recreate` when you need a clean in-memory rate-limit store. A stale image has faked a pass on this project before.
+**Check `hostname` before touching any container.** On the scheduled laptop (`ORCHARD-MGETUTUA`) the `sprout-backend` container is **production**. Never rebuild, recreate, restart or stop it there (AGENTS.md production guard); probe with the e2e web server or a throwaway `docker run` of the image instead. On the dev work PC, if you touch the container, use `--build` when source changed and `--force-recreate` when you need a clean in-memory rate-limit store; a stale image has faked a pass on this project before. From phase 15 on, also confirm that machine's `.env` doesn't set `SCHEDULER_ENABLED=true` before recreating.
 
 ### 2. Diff the report against reality
 

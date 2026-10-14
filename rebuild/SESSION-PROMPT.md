@@ -19,7 +19,7 @@ Handoff report ─ paste ─▶           writes the addendum ─ paste ─▶  
 
 ---
 
-## Prompt 1 — implementer (DeepSeek V4 Flash)
+## Prompt 1 — implementer (DeepSeek V4.1 Flash)
 
 > You are working on **Sprout Automator**, a self-hosted multi-tenant web app that clocks colleagues in and out of Sprout HRHub on a schedule. The project is thoroughly specified — read before you write.
 >

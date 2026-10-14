@@ -9,6 +9,12 @@ permission:
   grep: allow
   bash:
     "*": allow
+    "docker compose down*": deny
+    "docker compose rm*": deny
+    "docker rm*": deny
+    "docker volume rm*": deny
+    "docker system prune*": deny
+    "docker volume prune*": deny
     "git commit*": deny
     "git add*": deny
     "git push*": deny
@@ -51,7 +57,7 @@ Integration and e2e need Postgres: `docker compose up -d postgres`. Before e2e, 
 
 - **Never report a gate green because the code looks right.** Paste the real output.
 - **Never proceed past a red gate** by explaining why the failure is acceptable. Fix it, or stop and report that you could not.
-- **Baselines:** read the current count out of `rebuild/STATE.md` before you start — do not assume a fixed number. **The old 161/106/5/16 baseline is stale**; the last recorded figure (phase 14, 2026-08-24) was 225 backend unit / 150 backend integration / 5 frontend unit / 16 e2e, and `STATE.md`'s Known gaps section flags even that as provisional until phase 15 §15B re-runs the whole suite twice from cold and pins it for real. Higher than whatever STATE.md currently says is expected when you add tests. **Lower is a finding** — a suite that runs fewer tests than before has silently stopped testing something.
+- **Baselines:** read the current count out of `rebuild/STATE.md` before you start — do not assume a fixed number. **The old 161/106/5/16 baseline is stale**; the last recorded figure (2026-10-13, the wall-clock tick commit) was **242 backend unit / 150 backend integration** (frontend 5 unit / 16 e2e, last run in phase 14), and STATE.md's Known gaps section flags even that as provisional until phase 15 §15E re-runs the whole suite twice from cold and pins it for real. Higher than whatever STATE.md currently says is expected when you add tests. **Lower is a finding** — a suite that runs fewer tests than before has silently stopped testing something.
 - Checks marked **`[manual]`** need a human. List them as outstanding. **Never claim one passed.**
 
 ## Traps this project has actually fallen into
