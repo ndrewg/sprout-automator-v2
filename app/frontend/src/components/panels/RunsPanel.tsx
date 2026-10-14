@@ -130,6 +130,8 @@ export function RunsPanel() {
                   {runs.map((run) => {
                     const isOpen = expanded === run.id;
                     const steps = run.steps ?? [];
+                    const detailId = `run-detail-${run.id}`;
+                    const toggle = () => setExpanded(isOpen ? null : run.id);
                     return (
                       // Fragment carries the key, not the <tr> inside it: the key
                       // must sit on the outermost element returned by map(), or
@@ -138,17 +140,35 @@ export function RunsPanel() {
                       // new runs are inserted at the TOP, so every index shifts
                       // and the expanded detail row can attach to the wrong run.
                       <Fragment key={run.id}>
+                        {/* The whole row stays a mouse/touch target; the keyboard
+                            and screen-reader control is the real <button> in the
+                            first cell (BACKLOG §13), which keeps table semantics
+                            intact. Its click is stopped so it doesn't also reach
+                            the row handler and toggle twice. Enter/Space come
+                            free with a native button. */}
                         <tr
                           className="cursor-pointer border-b hover:bg-muted/50"
-                          onClick={() => setExpanded(isOpen ? null : run.id)}
+                          onClick={toggle}
                         >
                           <td className="py-3 align-middle">
-                            <ChevronRight
-                              className={
-                                "size-4 text-muted-foreground transition-transform " +
-                                (isOpen ? "rotate-90" : "")
-                              }
-                            />
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-expanded={isOpen}
+                              aria-controls={isOpen ? detailId : undefined}
+                              aria-label={`Details for ${run.action} run, ${formatRunDate(run.startedAt, now)} ${fmt(run.startedAt)}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggle();
+                              }}
+                            >
+                              <ChevronRight
+                                className={
+                                  "size-4 text-muted-foreground transition-transform " +
+                                  (isOpen ? "rotate-90" : "")
+                                }
+                              />
+                            </Button>
                           </td>
                           <td className="py-3 pr-4 uppercase">{run.action}</td>
                           <td className="py-3 pr-4">
@@ -156,21 +176,21 @@ export function RunsPanel() {
                               {run.status}
                             </Badge>
                           </td>
-                          <td className="py-3 pr-4 tabular-nums">
+                          <td className="py-3 pr-4 whitespace-nowrap tabular-nums">
                             <time dateTime={run.startedAt}>
                               {formatRunDate(run.startedAt, now)}
                             </time>
                           </td>
-                          <td className="py-3 pr-4 tabular-nums">
+                          <td className="py-3 pr-4 whitespace-nowrap tabular-nums">
                             {fmt(run.startedAt)}
                           </td>
-                          <td className="py-3 pr-4 tabular-nums">
+                          <td className="py-3 pr-4 whitespace-nowrap tabular-nums">
                             {fmt(run.finishedAt)}
                           </td>
                         </tr>
                         <AnimatePresence initial={false}>
                           {isOpen ? (
-                            <tr key={`${run.id}-detail`}>
+                            <tr key={`${run.id}-detail`} id={detailId}>
                               <td colSpan={6} className="p-0">
                                 <motion.div
                                   initial={{ height: 0, opacity: 0 }}

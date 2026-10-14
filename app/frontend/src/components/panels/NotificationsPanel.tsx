@@ -11,12 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-} from "@/components/ui/input-group";
+import { InputGroup, InputGroupInput } from "@/components/ui/input-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -28,43 +23,8 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Skeleton } from "@/components/ui/skeleton";
-import { CircleCheck, Eye, EyeOff, HelpCircle, TriangleAlert } from "lucide-react";
-
-function RevealInput({
-  id,
-  value,
-  onChange,
-  placeholder,
-}: {
-  id: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-}) {
-  const [show, setShow] = useState(false);
-  return (
-    <InputGroup>
-      <InputGroupInput
-        id={id}
-        type={show ? "text" : "password"}
-        autoComplete="off"
-        placeholder={placeholder}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      />
-      <InputGroupAddon align="inline-end">
-        <InputGroupButton
-          type="button"
-          size="icon-xs"
-          aria-label={show ? "Hide" : "Show"}
-          onClick={() => setShow((s) => !s)}
-        >
-          {show ? <EyeOff /> : <Eye />}
-        </InputGroupButton>
-      </InputGroupAddon>
-    </InputGroup>
-  );
-}
+import { CircleCheck, HelpCircle, TriangleAlert } from "lucide-react";
+import { RevealInput } from "@/components/RevealInput";
 
 export function NotificationsPanel() {
   const { data, isLoading } = useNotifications();

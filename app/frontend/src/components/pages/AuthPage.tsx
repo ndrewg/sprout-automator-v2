@@ -9,6 +9,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { RevealInput } from "@/components/RevealInput";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Field,
@@ -78,14 +79,13 @@ export function AuthPage() {
               {mode !== "forgot" ? (
                 <Field>
                   <FieldLabel htmlFor="password">Password</FieldLabel>
-                  <Input
+                  <RevealInput
                     id="password"
-                    type="password"
                     autoComplete={
                       mode === "login" ? "current-password" : "new-password"
                     }
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={setPassword}
                     minLength={12}
                     required
                   />

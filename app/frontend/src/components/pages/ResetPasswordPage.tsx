@@ -9,7 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { RevealInput } from "@/components/RevealInput";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Field,
@@ -76,12 +76,11 @@ export function ResetPasswordPage({
               <FieldGroup>
                 <Field>
                   <FieldLabel htmlFor="new-password">New password</FieldLabel>
-                  <Input
+                  <RevealInput
                     id="new-password"
-                    type="password"
                     autoComplete="new-password"
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={setPassword}
                     minLength={12}
                     required
                   />
