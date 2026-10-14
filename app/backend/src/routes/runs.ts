@@ -5,9 +5,9 @@ import {
   getRun,
   isRunWaitingForOtp,
   listRuns,
-  startRun,
   submitRunOtp,
 } from "../services/runs";
+import { startRun } from "../services/run-lifecycle";
 import { runQueue } from "../services/run-queue";
 import type { Run } from "../db/schema";
 

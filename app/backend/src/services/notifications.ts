@@ -26,7 +26,7 @@ import {
 } from "../lib/telegram";
 import type { ClockAction } from "../automation/clock";
 import { resolveHolidayDecision } from "./holidays";
-import { hasPendingRetry as hasPendingRetryFromRegistry } from "./retry-registry";
+import { hasPendingRetry as hasPendingRetryInDb } from "./retry-state";
 
 // Policy for notifications. Deliberately HTTP-free (the transport lives in
 // lib/telegram.ts) and DB-aware (settings, blocked-count, the idempotency
@@ -137,18 +137,25 @@ export function renderRunFinishedMessage(params: {
   return `ℹ️ <b>${label} skipped</b>\n${time} · ${day}${body}`;
 }
 
+/**
+ * The missed-run message. Since phase 15C a late wake is ALERT ONLY: a host
+ * that comes up after the fire window does not clock in late, because the
+ * operator pauses by powering the machine off, so a late automatic clock-in
+ * would put a false record on a day off. The message therefore says plainly
+ * that the automator was not running and that the human should clock in.
+ */
 export function renderMissedMessage(
   action: ClockAction,
   expectedTime: string,
   dateStr: string,
 ): string {
-  const label = action === "in" ? "Clock-in" : "Clock-out";
+  const label = action === "in" ? "clock-in" : "clock-out";
   const verb = action === "in" ? "in" : "out";
   const hhmm = expectedTime.length >= 5 ? expectedTime.slice(0, 5) : expectedTime;
   return (
-    `🔴 <b>${label} did not run</b>\nExpected ${hhmm} · ${formatManilaDay(dateStr)}\n\n` +
-    `No run was recorded today. The scheduler may have been asleep or the ` +
-    `server down. Clock ${verb} manually if you haven't already.`
+    `🔴 <b>Missed the ${hhmm} ${label}</b>\n${formatManilaDay(dateStr)}\n\n` +
+    `The automator wasn't running at ${hhmm}. ` +
+    `Clock ${verb} yourself if you're working today.`
   );
 }
 
@@ -386,14 +393,16 @@ export type SweepDeps = {
     dateStr: string,
     now: Date,
   ) => Promise<boolean>;
-  // Phase 14: whether a retry is currently pending for (user, action, date).
+  // Phase 14/15B: whether a retry is currently queued for (user, action, date).
   // When it is, the sweep must NOT also send a missed-run alert — both would
-  // describe the same morning and train the user to distrust both.
+  // describe the same morning and train the user to distrust both. The answer
+  // comes from `runs.retry_at` in the database, so it survives a restart (the
+  // old in-memory registry did not).
   hasPendingRetry: (
     userId: string,
     action: ClockAction,
     dateStr: string,
-  ) => boolean;
+  ) => Promise<boolean>;
   // "claimed" = this sweep inserted the notice row and owns the send.
   // "retry"  = the row already exists but was never notified (send failed or
   //            was skipped earlier) — a later sweep may try again.
@@ -437,7 +446,7 @@ export const defaultSweepDeps: SweepDeps = {
     return rows.some((r) => manilaDateString(r.startedAt) === dateStr);
   },
   hasPendingRetry: (userId, action, dateStr) =>
-    hasPendingRetryFromRegistry(userId, action, dateStr),
+    hasPendingRetryInDb(userId, action, dateStr),
   tryInsertMissedNotice: async (userId, action, dateStr) => {
     // The database decides who sends, not application logic: onConflictDoNothing
     // means a conflicting (user, date, action) returns NO row, and only a real
@@ -515,10 +524,13 @@ export async function sweepMissedRuns(
         if (now.getTime() < expected.getTime() + graceMs) continue;
 
         const hasRun = await deps.hasRunToday(row.userId, action, todayStr, now);
-        // A retry is pending: the morning is being handled — a missed-run alert
+        // A retry is queued: the morning is being handled — a missed-run alert
         // would duplicate the retry messages and train the user to distrust
-        // both (phase 14B). Suppress.
-        if (hasRun || deps.hasPendingRetry(row.userId, action, todayStr)) {
+        // both (phase 14B, now durable across a restart — 15B). Suppress.
+        if (
+          hasRun ||
+          (await deps.hasPendingRetry(row.userId, action, todayStr))
+        ) {
           continue;
         }
 

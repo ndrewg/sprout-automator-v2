@@ -3,7 +3,6 @@ import { db } from "../db/client";
 import { credentials, runs, type Run } from "../db/schema";
 import { decryptOptional } from "../lib/encryption";
 import { logger } from "../lib/logger";
-import { runQueue } from "./run-queue";
 import { runAutomation } from "../automation/runAutomation";
 import {
   cancelWait,
@@ -11,108 +10,13 @@ import {
   submitOtp,
 } from "../automation/otp-bridge";
 import { createOtpAcquirer } from "./otp-acquisition";
-import { errorSummary, stripAnsi } from "../lib/text";
-import { isUniqueViolation } from "../lib/pg-errors";
-import { notifyRunFinished } from "./notifications";
-import { scheduleRetryOnFailure } from "./retry";
-import { cancelPendingRetry } from "./retry-registry";
-import { manilaDateString } from "../lib/ph-holidays";
-import type { ClockAction } from "../automation/clock";
+import { errorSummary } from "../lib/text";
+import { finishRun } from "./run-lifecycle";
 
-type StartRunResult =
-  | { ok: true; run: Run }
-  | { ok: false; reason: "no_credentials" | "already_running" };
-
-export async function startRun(params: {
-  userId: string;
-  action: ClockAction;
-  attempt?: number;
-}): Promise<StartRunResult> {
-  const { userId, action } = params;
-
-  const [cred] = await db
-    .select()
-    .from(credentials)
-    .where(eq(credentials.userId, userId))
-    .limit(1);
-  if (!cred || !cred.sproutUsernameEnc || !cred.sproutPasswordEnc) {
-    return { ok: false, reason: "no_credentials" };
-  }
-
-  // Insert as `pending` and let the partial unique index gate concurrency.
-  // NEVER pre-check with a SELECT — the DB index is the race guard.
-  try {
-    const [run] = await db
-      .insert(runs)
-      .values({ userId, action, status: "pending", attempt: params.attempt ?? 0 })
-      .returning();
-    if (!run) throw new Error("startRun: insert returned no row");
-    runQueue.enqueue({ runId: run.id });
-    // Starting any run for this action supersedes a pending retry: a manual
-    // "Clock in now" and the next scheduled fire are both explicit statements
-    // that replace the queued retry (phase 14 cancellation).
-    cancelPendingRetry(userId, action, manilaDateString(new Date()));
-    logger.info({ runId: run.id, userId, action }, "run enqueued");
-    return { ok: true, run };
-  } catch (err: unknown) {
-    if (isUniqueViolation(err)) {
-      return { ok: false, reason: "already_running" };
-    }
-    throw err;
-  }
-}
-
-/**
- * The single terminal-state writer for a run: updates the DB, logs, and fires
- * the notification. Every place a run reaches a terminal status must go
- * through here so a notification is never silently skipped by a new code path.
- */
-async function finalizeRun(
-  run: Run,
-  patch: {
-    status: "success" | "skipped" | "failure";
-    loginMethod?: string | null;
-    error?: string | null;
-    skipReason?: string | null;
-  },
-): Promise<void> {
-  // skipReason is for the notifier only — it is not a DB column. And the error
-  // is stripped of ANSI escapes before it is persisted, so the RunsPanel,
-  // logs, and notification all see clean text (defect 3).
-  const { skipReason, error: rawError, ...dbPatch } = patch;
-  const error =
-    rawError === undefined || rawError === null ? rawError : stripAnsi(rawError);
-  const [updated] = await db
-    .update(runs)
-    .set({ ...dbPatch, error, finishedAt: new Date() })
-    .where(eq(runs.id, run.id))
-    .returning();
-  if (!updated) throw new Error("finalizeRun: update returned no row");
-  logger.info({ runId: run.id, status: patch.status }, "run finished");
-
-  // Fire-and-forget (sanctioned idiom #2, §03). A notification must never
-  // change run status or timing. notifyRunFinished never throws; the .catch
-  // is belt-and-braces so a future refactor can't make this crash a run.
-  //
-  // Phase 14B: a failure that schedules a retry (or ends with a give-up) does
-  // NOT also get the standard failure ⚠️ — the retry/give-up message replaces
-  // it, so one bad morning produces the scheduling message, silence, and one
-  // resolution message instead of one ⚠️ per attempt. The decision is fast
-  // (memory + config only); the messages themselves are fire-and-forget inside
-  // scheduleRetryOnFailure, so a dead Telegram endpoint can never change the
-  // run's status or timing (hard rule 11).
-  let notifyFailure = true;
-  if (patch.status === "failure") {
-    const outcome = await scheduleRetryOnFailure(updated);
-    notifyFailure = outcome === "none";
-  }
-  if (notifyFailure) {
-    void notifyRunFinished({
-      run: updated,
-      skipReason: skipReason ?? null,
-    }).catch(() => {}); // oxlint-disable-line promise/prefer-await-to-then -- sanctioned fire-and-forget idiom (#2), §03.
-  }
-}
+// The run EXECUTOR and the run history queries. Creation and every terminal
+// write moved to services/run-lifecycle.ts (phase 15A, D20) — this module owns
+// "how a run executes" (decrypt creds, race the OTP bridge against IMAP, drive
+// Playwright) and "how runs are read back", not "what a run's state means".
 
 export async function executeQueuedRun(runId: string): Promise<void> {
   const [run] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
@@ -124,8 +28,8 @@ export async function executeQueuedRun(runId: string): Promise<void> {
   // Everything that can fail at runtime — the credentials select, the decrypt
   // (a wrong APP_ENCRYPTION_KEY throws here), the runAutomation step, the
   // terminal write — lives inside ONE try so any of them takes the normal
-  // failure path and reaches finalizeRun. A rejection that escapes this
-  // function would otherwise bypass finalizeRun entirely and kill the process
+  // failure path and reaches finishRun. A rejection that escapes this function
+  // would otherwise bypass the terminal step entirely and kill the process
   // (backlog #2: decrypt used to sit outside this try).
   try {
     const [cred] = await db
@@ -140,7 +44,8 @@ export async function executeQueuedRun(runId: string): Promise<void> {
     if (!username || !password) {
       // Worth notifying about precisely because the user won't otherwise
       // discover their config is broken until payday.
-      await finalizeRun(run, {
+      await finishRun({
+        run,
         status: "failure",
         error: "No Sprout credentials available for this run",
       });
@@ -187,7 +92,8 @@ export async function executeQueuedRun(runId: string): Promise<void> {
         ? "skipped"
         : "success"
       : "failure";
-    await finalizeRun(run, {
+    await finishRun({
+      run,
       status,
       loginMethod: result.loginMethod,
       error: result.error ?? null,
@@ -197,7 +103,7 @@ export async function executeQueuedRun(runId: string): Promise<void> {
     cancelWait(runId);
     const message = errorSummary(err);
     logger.error({ runId, err }, "run execution failed");
-    await finalizeRun(run, { status: "failure", error: message });
+    await finishRun({ run, status: "failure", error: message });
   }
 }
 

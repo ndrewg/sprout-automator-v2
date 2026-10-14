@@ -3,10 +3,13 @@ import { logger } from "./lib/logger";
 import { parseSignupAllowlist } from "./lib/signup-allowlist";
 import { trustedCloudflarePeerCount } from "./middleware/security";
 import { app } from "./app";
-import { recoverOrphanedRuns, runQueue } from "./services/run-queue";
+import { runQueue } from "./services/run-queue";
 import { executeQueuedRun } from "./services/runs";
-import { loadAllSchedules, startScheduler } from "./services/scheduler";
-import { startGazetteRefresh } from "./services/gazette";
+import {
+  failRunFromExecutor,
+  recoverOrphanedRuns,
+} from "./services/run-lifecycle";
+import { startScheduling } from "./services/scheduler";
 
 // Backstop for anything the run executor's .catch or the app's error handler
 // miss: log and keep serving. A scheduler that dies on an unrelated rejection
@@ -48,26 +51,28 @@ async function start(): Promise<void> {
   // executor that could launch Chromium.
   runQueue.setExecutor(executeQueuedRun);
 
-  // Any run left pending/running by a previous shutdown is orphaned — flip it
-  // to failure so the user (and the single-active-run guard) aren't stuck.
+  // …and the failure backstop: an executor rejection still ends the run through
+  // the Run lifecycle's one terminal step (notified + retried like any other
+  // failure). Injected here, the composition root, so services/run-queue.ts and
+  // services/run-lifecycle.ts do not import each other (15A).
+  runQueue.setFailureHandler(failRunFromExecutor);
+
+  // Any run left pending/running by a previous shutdown is orphaned. The
+  // lifecycle ENDS each one (status failure, error "Interrupted by server
+  // restart") and — new in phase 15A — notifies and queues a retry when one is
+  // still possible. Before, the row was flipped silently and, because a run row
+  // then existed, both the slot re-fire check and the missed-run sweep stayed
+  // quiet: the user was never told.
   const recovered = await recoverOrphanedRuns();
   if (recovered > 0) {
     logger.info({ recovered }, "recovered orphaned runs from previous shutdown");
   }
 
-  // Rehydrate enabled schedules from the DB into the in-process scheduler.
-  const scheduleCount = await loadAllSchedules();
-  logger.info({ scheduleCount }, "loaded schedules from database");
-
-  // The wall-clock tick: fires due daily slots and runs the global missed-run
-  // sweep — a missed run is invisible unless the process that survived to
-  // report it reconciles it.
-  startScheduler();
-
-  // Nightly Official Gazette refresh (cache-first advisory layer). Non-blocking:
-  // a cold cache degrades to the library, and a slow first fetch must not delay
-  // boot.
-  startGazetteRefresh();
+  // One host schedules (15D, D8). `SCHEDULER_ENABLED` defaults to false, and
+  // without it this process registers NOTHING time-based: no daily slots, no
+  // retry trigger, no missed-run sweep, no nightly jobs. Manual runs and the
+  // whole UI still work. It logs one line either way.
+  await startScheduling();
 
   app.listen(config.PORT, "0.0.0.0", () => {
     logger.info(

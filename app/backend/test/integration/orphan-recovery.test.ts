@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { runs } from "../../src/db/schema";
 import { db } from "../../src/db/client";
-import { recoverOrphanedRuns } from "../../src/services/run-queue";
+import { recoverOrphanedRuns } from "../../src/services/run-lifecycle";
 import {
   closeTestServer,
   createUser,

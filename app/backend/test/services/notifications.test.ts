@@ -93,6 +93,7 @@ function makeRun(overrides: Partial<Run> = {}): Run {
     action: "in",
     status: "success",
     attempt: 0,
+    retryAt: null,
     loginMethod: null,
     error: null,
     steps: [],
@@ -273,22 +274,22 @@ describe("renderRunFinishedMessage — the four shapes", () => {
 });
 
 describe("renderMissedMessage", () => {
-  it("renders the expected-time header and manual-action hint", () => {
+  it("renders the expected-time header and the clock-in-yourself hint (15C late wake)", () => {
     expect(renderMissedMessage("in", "05:30:00", "2026-08-10")).toBe(
-      "🔴 <b>Clock-in did not run</b>\nExpected 05:30 · Mon 10 Aug\n\n" +
-        "No run was recorded today. The scheduler may have been asleep or the " +
-        "server down. Clock in manually if you haven't already.",
+      "🔴 <b>Missed the 05:30 clock-in</b>\nMon 10 Aug\n\n" +
+        "The automator wasn't running at 05:30. " +
+        "Clock in yourself if you're working today.",
     );
   });
 
-  it("derives the action verb — a clock-out miss says Clock out", () => {
+  it("derives the action verb — a clock-out miss says clock out", () => {
     expect(renderMissedMessage("out", "18:05:00", "2026-08-10")).toBe(
-      "🔴 <b>Clock-out did not run</b>\nExpected 18:05 · Mon 10 Aug\n\n" +
-        "No run was recorded today. The scheduler may have been asleep or the " +
-        "server down. Clock out manually if you haven't already.",
+      "🔴 <b>Missed the 18:05 clock-out</b>\nMon 10 Aug\n\n" +
+        "The automator wasn't running at 18:05. " +
+        "Clock out yourself if you're working today.",
     );
     expect(renderMissedMessage("out", "18:05:00", "2026-08-10")).not.toContain(
-      "Clock in manually",
+      "Clock in yourself",
     );
   });
 });
@@ -596,7 +597,7 @@ function makeSweepDeps(overrides: Partial<SweepDeps> = {}): {
       ];
     },
     hasRunToday: async () => false,
-    hasPendingRetry: () => false,
+    hasPendingRetry: async () => false,
     tryInsertMissedNotice: async (userId, action, dateStr) => {
       calls.inserted.push(`${userId}:${action}:${dateStr}`);
       return "claimed";
@@ -631,7 +632,7 @@ describe("sweepMissedRuns", () => {
     // in is past 05:50 grace → missed; out is still in the future → skipped.
     expect(calls.inserted).toEqual(["u1:in:2026-08-10"]);
     expect(calls.dispatched).toHaveLength(1);
-    expect(calls.dispatched[0]).toContain("Clock-in did not run");
+    expect(calls.dispatched[0]).toContain("Missed the 05:30 clock-in");
     expect(calls.marked).toEqual(["u1:in:2026-08-10"]);
 
     await sweepMissedRuns(deps);

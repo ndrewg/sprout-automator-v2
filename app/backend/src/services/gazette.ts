@@ -55,24 +55,49 @@ export async function refreshGazetteCache(
 }
 
 /**
+ * Once-per-process flag for the degrade warning above: state that must not spam
+ * a log file with the same failure on every tick.
+ */
+let gazetteReadWarned = false;
+
+/**
  * Load the cached proclamation holidays for a single Manila calendar day.
  * This is the CACHE-FIRST read the scheduler uses at decision time — no
  * network. Returns [] when the cache is cold/empty for that day, and the caller
  * (services/holidays.ts) degrades to the library.
+ *
+ * Phase 15A: a read that THROWS also returns [] rather than propagating. An
+ * unmigrated database (`42P01 undefined_table`) used to escape this function
+ * and take out all four callers of `resolveHolidayDecision` — the cron fire, the
+ * missed-run sweep, the retry gating and the dashboard's holiday display — so a
+ * missing table broke the automation AND the alert that would have reported it.
+ * A cache read is advisory: it may ADD a skip, never block one, and never block
+ * a run. Logged once per process (a repeat of the same failure is not news).
  */
 export async function loadGazetteForDate(
   dateStr: string,
 ): Promise<GazetteEntry[]> {
-  const rows = await db
-    .select()
-    .from(gazetteHolidays)
-    .where(eq(gazetteHolidays.manilaDate, dateStr));
-  return rows.map((r) => ({
-    date: r.manilaDate,
-    name: r.name,
-    scope: r.scope as GazetteEntry["scope"],
-    proclamationNo: r.proclamationNo,
-  }));
+  try {
+    const rows = await db
+      .select()
+      .from(gazetteHolidays)
+      .where(eq(gazetteHolidays.manilaDate, dateStr));
+    return rows.map((r) => ({
+      date: r.manilaDate,
+      name: r.name,
+      scope: r.scope as GazetteEntry["scope"],
+      proclamationNo: r.proclamationNo,
+    }));
+  } catch (err: unknown) {
+    if (!gazetteReadWarned) {
+      gazetteReadWarned = true;
+      logger.warn(
+        { errName: err instanceof Error ? err.name : typeof err },
+        "gazette cache read failed — degrading to the library (this warning is logged once)",
+      );
+    }
+    return [];
+  }
 }
 
 const NIGHTLY_AT = "03:00"; // Manila wall time, before the 05:30 decision.

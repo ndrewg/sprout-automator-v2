@@ -5,6 +5,7 @@ import { db } from "../../src/db/client";
 import { credentials, notificationSettings, runs } from "../../src/db/schema";
 import { encrypt } from "../../src/lib/encryption";
 import { executeQueuedRun } from "../../src/services/runs";
+import { failRunFromExecutor } from "../../src/services/run-lifecycle";
 import { RunQueue } from "../../src/services/run-queue";
 import {
   closeTestServer,
@@ -178,11 +179,14 @@ describe("run executor failure backstops", () => {
 
     // A dedicated queue whose executor rejects unconditionally — a stand-in for
     // whatever escapes executeQueuedRun's own try/catch (e.g. a DB error on its
-    // initial run select). The backstop is what the drain loop's .catch runs.
+    // initial run select). The backstop is what the drain loop's .catch runs:
+    // since phase 15A the queue is handed the Run lifecycle's terminal writer
+    // instead of importing it (the same registration index.ts does at boot).
     const queue = new RunQueue(1);
     queue.setExecutor(async () => {
       throw new Error("executor threw before any handling");
     });
+    queue.setFailureHandler(failRunFromExecutor);
     queue.enqueue({ runId });
 
     await waitForRunTerminal(runId);

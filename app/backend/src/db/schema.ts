@@ -117,6 +117,12 @@ export const runs = pgTable(
     // attempt 0; each retry is attempt 1, 2, … up to RETRY_MAX_ATTEMPTS. Used to
     // bound retries and to render "tried N times" in the give-up message.
     attempt: integer("attempt").notNull().default(0),
+    // Phase 15 (D20): when this failed run's retry is due, in the database
+    // rather than in a process-local Map, so it survives a restart. Non-null
+    // means a retry is queued; null means none (never scheduled, already
+    // claimed by the tick, or cancelled). One column, no table, because a
+    // pending retry is a property of the latest failed attempt.
+    retryAt: timestamp("retry_at", { withTimezone: true }),
     loginMethod: text("login_method"),
     error: text("error"),
     steps: jsonb("steps")

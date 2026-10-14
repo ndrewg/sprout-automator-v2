@@ -1,26 +1,24 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { parseHhmm } from "../../src/config";
+import { manilaHhmm } from "../../src/lib/wall-clock-tick";
 import {
   currentPolicy,
+  cutoffFor,
   nextAttempt,
   pastCutoff,
   renderRetryGiveUpMessage,
   renderRetryScheduledMessage,
   type RetryPolicy,
 } from "../../src/services/retry";
-import {
-  cancelPendingRetry,
-  clearPendingRetries,
-  fireDueRetries,
-  hasPendingRetry,
-  manilaWallTime,
-  scheduleOneShotRetry,
-} from "../../src/services/retry-registry";
-import { stopWallClockTick } from "../../src/lib/wall-clock-tick";
 
-// Phase 14 unit tests: the scheduling arithmetic is pure and takes an injected
-// clock — no Date.now() inside the schedulable logic (BACKLOG §11). The cutoff
-// math is tested directly against Manila wall-clock times.
+// Phase 14 unit tests, carried into phase 15: the scheduling arithmetic is pure
+// and takes an injected clock — no Date.now() inside the schedulable logic
+// (BACKLOG §11). The cutoff math is tested directly against Manila wall-clock
+// times.
+//
+// Phase 15B moved the pending-retry STATE out of an in-memory registry and into
+// `runs.retry_at`, so the tick that fires a due retry now needs a database — its
+// tests live in test/integration/durable-retry.test.ts.
 
 const POLICY: RetryPolicy = {
   intervalMinutes: 30,
@@ -32,53 +30,11 @@ const POLICY: RetryPolicy = {
 // A failure at 05:35 Manila on Monday 2026-08-10.
 const FAILED_AT = new Date("2026-08-10T05:35:00+08:00");
 
-describe("manilaWallTime", () => {
+describe("manilaHhmm", () => {
   it("formats an instant as Manila HH:mm", () => {
-    expect(manilaWallTime(new Date("2026-08-10T05:35:00+08:00"))).toBe("05:35");
+    expect(manilaHhmm(new Date("2026-08-10T05:35:00+08:00"))).toBe("05:35");
     // UTC 2026-08-10T01:00:00Z is 09:00 Manila (UTC+8).
-    expect(manilaWallTime(new Date("2026-08-10T01:00:00Z"))).toBe("09:00");
-  });
-});
-
-describe("fireDueRetries — tick-driven one-shot retries", () => {
-  const USER = "u1";
-  const DATE = "2026-08-10";
-  const FIRE_AT = new Date("2026-08-10T06:05:00+08:00");
-
-  function schedule(onFire: () => void): void {
-    scheduleOneShotRetry({
-      userId: USER,
-      action: "in",
-      manilaDate: DATE,
-      attempt: 1,
-      fireAt: FIRE_AT,
-      onFire,
-    });
-  }
-
-  afterEach(() => {
-    clearPendingRetries();
-    stopWallClockTick();
-  });
-
-  it("does not fire before fireAt", () => {
-    let fired = 0;
-    schedule(() => void fired++);
-    fireDueRetries(new Date(FIRE_AT.getTime() - 1));
-    expect(fired).toBe(0);
-  });
-
-  it("fires on a tick however late it is, exactly once, and stays pending until cancelled", () => {
-    let fired = 0;
-    schedule(() => void fired++);
-    // 27 minutes late: what killed the node-cron version (2026-10-13).
-    fireDueRetries(new Date(FIRE_AT.getTime() + 27 * 60 * 1000));
-    fireDueRetries(new Date(FIRE_AT.getTime() + 28 * 60 * 1000));
-    expect(fired).toBe(1);
-    // attemptRun cancels once it has run; until then the sweep must stay quiet.
-    expect(hasPendingRetry(USER, "in", DATE)).toBe(true);
-    cancelPendingRetry(USER, "in", DATE);
-    expect(hasPendingRetry(USER, "in", DATE)).toBe(false);
+    expect(manilaHhmm(new Date("2026-08-10T01:00:00Z"))).toBe("09:00");
   });
 });
 
@@ -107,6 +63,13 @@ describe("pastCutoff — the wall-clock brake", () => {
     // UTC hour (4) is nowhere near noon.
     const instant = new Date("2026-08-10T04:01:00Z");
     expect(pastCutoff(instant, "12:00")).toBe(true);
+  });
+});
+
+describe("cutoffFor", () => {
+  it("gives each action its own cutoff", () => {
+    expect(cutoffFor("in", POLICY)).toBe("12:00");
+    expect(cutoffFor("out", POLICY)).toBe("23:00");
   });
 });
 
@@ -157,6 +120,24 @@ describe("nextAttempt — interval + cap + cutoff, all injected", () => {
       new Date("2026-08-10T22:30:00+08:00"),
     );
   });
+
+  it("never queues a retry that crosses into another Manila day", () => {
+    // 23:45 + 30min = 00:15 TOMORROW, which is before the 23:00 cutoff by the
+    // clock, so the cutoff check alone would let it through.
+    expect(
+      nextAttempt(new Date("2026-08-10T23:45:00+08:00"), "out", 0, POLICY),
+    ).toBeNull();
+    // Same shape with a long interval: 23:45 + 12h lands mid-morning tomorrow.
+    const longPolicy: RetryPolicy = {
+      intervalMinutes: 720,
+      maxAttempts: 3,
+      cutoffClockIn: "23:00", // deliberately permissive
+      cutoffClockOut: "23:00",
+    };
+    expect(
+      nextAttempt(new Date("2026-08-10T23:45:00+08:00"), "out", 0, longPolicy),
+    ).toBeNull();
+  });
 });
 
 describe("message rendering", () => {
@@ -194,6 +175,26 @@ describe("message rendering", () => {
       "Please clock in manually in HRHub.",
     );
     expect(renderRetryGiveUpMessage("out", 1)).toContain("1 time");
+  });
+
+  it("a first attempt that cannot be retried says so without inventing a count", () => {
+    const msg = renderRetryGiveUpMessage("in", 0);
+    expect(msg).toContain("Clock-in failed and gave up");
+    expect(msg).not.toContain("0 times");
+    expect(msg).toContain("Please clock in manually in HRHub.");
+  });
+
+  it("the give-up carries the failure's own error, HTML-escaped and trimmed", () => {
+    const msg = renderRetryGiveUpMessage(
+      "out",
+      0,
+      "Interrupted by server restart",
+    );
+    expect(msg).toContain("Interrupted by server restart");
+    // A message with markup is escaped, never injected into Telegram's HTML.
+    const escaped = renderRetryGiveUpMessage("in", 1, "boom <script>");
+    expect(escaped).toContain("boom &lt;script&gt;");
+    expect(escaped).not.toContain("<script>");
   });
 });
 

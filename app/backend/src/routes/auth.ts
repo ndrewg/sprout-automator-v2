@@ -21,6 +21,7 @@ import {
 } from "../lib/signup-allowlist";
 import { requireAuth } from "../middleware/auth";
 import { unregisterSchedule } from "../services/scheduler";
+import { cancelPendingRetriesForUser } from "../services/run-lifecycle";
 import { removeUserData } from "../lib/paths";
 import { isUniqueViolation } from "../lib/pg-errors";
 
@@ -396,6 +397,11 @@ authRouter.delete("/account", requireAuth, async (req: Request, res: Response) =
   // timers, so unregistering is what keeps a deleted user's schedule from
   // firing a run against no account.
   unregisterSchedule(user.id);
+
+  // Phase 15A: cancel the user's queued retries too, through the Run lifecycle.
+  // The cascade would take the rows anyway, but a retry must not fire against
+  // an account that is on its way out (it would be a run with no user).
+  await cancelPendingRetriesForUser(user.id);
 
   // Written BEFORE the delete so the row survives with user_id NULL (FK ON
   // DELETE SET NULL). Metadata carries only the non-reversible emailHash —

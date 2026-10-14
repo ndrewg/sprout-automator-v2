@@ -65,6 +65,22 @@ export function wallClockLastTickAt(): string | null {
   return lastTickAt;
 }
 
+/** The names of the currently registered consumers, for tests and /health-adjacent checks. */
+export function tickHandlerNames(): string[] {
+  return [...handlers.keys()];
+}
+
+/**
+ * Test hook: drop ONE consumer, leaving the others and the shared interval
+ * alone. `stopWallClockTick` below is the sledgehammer — it also drops the
+ * scheduler's handler, so a test that used it mid-file had to know to
+ * re-register. Prefer this for a per-consumer reset (phase 15E).
+ */
+export function offTick(name: string): void {
+  handlers.delete(name);
+  if (handlers.size === 0) stopWallClockTick();
+}
+
 /** Test hook: stop the interval and drop every handler. */
 export function stopWallClockTick(): void {
   if (timer) clearInterval(timer);

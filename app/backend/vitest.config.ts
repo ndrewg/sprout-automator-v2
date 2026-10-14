@@ -34,6 +34,13 @@ export default defineConfig({
         test: {
           name: "integration",
           include: ["test/integration/**/*.test.ts"],
+          // ONE shared afterEach for every integration file (phase 15E): the
+          // scheduler's module-global state (registered schedules, the
+          // fired-slot set, the sweep bucket) and the wall-clock tick's
+          // handlers are reset between tests. As a per-file habit it leaked — a
+          // file that scheduled a retry and never tore it down failed its
+          // neighbours, and that is part of what made the suite flaky.
+          setupFiles: ["./test/integration/setup.ts"],
           // One test database, shared across all integration files: file parallelism
           // would make concurrent migrate() calls race to create the drizzle schema,
           // AND parallel resetDatabase() truncates would clobber each other. Run
@@ -50,6 +57,10 @@ export default defineConfig({
             // Same allowlist as the root test env (merged, not replaced): the
             // harness signs test users up through the real signup route.
             SIGNUP_ALLOWED: "Example.com, maz.getutua@gmail.com",
+            // The test process stands in for the SCHEDULING host (15D), so
+            // /health's "enabled schedules in the DB but none registered" check
+            // still has teeth here. Nothing in the suite calls startScheduler.
+            SCHEDULER_ENABLED: "true",
           },
         },
       },

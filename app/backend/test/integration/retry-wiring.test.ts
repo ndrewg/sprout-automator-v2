@@ -2,7 +2,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { eq } from "drizzle-orm";
 import { db } from "../../src/db/client";
 import { runs } from "../../src/db/schema";
-import { executeQueuedRun, startRun } from "../../src/services/runs";
+import { executeQueuedRun } from "../../src/services/runs";
+import { startRun } from "../../src/services/run-lifecycle";
 import { runAutomation } from "../../src/automation/runAutomation";
 import {
   closeTestServer,
@@ -13,12 +14,14 @@ import {
   startTestServer,
 } from "./harness";
 
-// Phase 14 wiring proof: every terminal-state writer goes through finalizeRun,
-// and finalizeRun must invoke scheduleRetryOnFailure on a FAILURE exactly once
-// and never on a skipped or successful run. The retry module is mocked here so
-// the call is observable in isolation from its own behaviour (which the
-// retry.test.ts suite covers). Deterministic at any wall-clock time.
-vi.mock("../../src/services/retry", () => ({
+// Phase 14/15A wiring proof: every terminal-state writer goes through the Run
+// lifecycle's finishRun, and finishRun must invoke scheduleRetryOnFailure on a
+// FAILURE exactly once and never on a skipped or successful run. The retry
+// module is mocked here so the call is observable in isolation from its own
+// behaviour (which the retry.test.ts suite covers). Deterministic at any
+// wall-clock time.
+vi.mock("../../src/services/retry", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/services/retry")>()),
   scheduleRetryOnFailure: vi.fn().mockResolvedValue("retry" as const),
 }));
 vi.mock("../../src/automation/runAutomation", () => ({
@@ -26,7 +29,7 @@ vi.mock("../../src/automation/runAutomation", () => ({
 }));
 import { scheduleRetryOnFailure } from "../../src/services/retry";
 
-describe("retry wiring: finalizeRun -> scheduleRetryOnFailure", () => {
+describe("retry wiring: finishRun -> scheduleRetryOnFailure", () => {
   beforeAll(async () => {
     await setupDatabase();
     await startTestServer();

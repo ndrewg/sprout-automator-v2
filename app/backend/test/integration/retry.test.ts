@@ -8,7 +8,7 @@ import {
   it,
   vi,
 } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../../src/db/client";
 import {
   missedRunNotices,
@@ -16,23 +16,22 @@ import {
   runs,
   schedules,
   users,
+  type Run,
 } from "../../src/db/schema";
 import { encrypt } from "../../src/lib/encryption";
 import { manilaDateString } from "../../src/lib/ph-holidays";
-import { executeQueuedRun, startRun } from "../../src/services/runs";
+import { executeQueuedRun } from "../../src/services/runs";
+import { fireDueRetries, startRun } from "../../src/services/run-lifecycle";
 import { runAutomation } from "../../src/automation/runAutomation";
 import {
-  attemptRun,
   currentPolicy,
   scheduleRetryOnFailure,
 } from "../../src/services/retry";
 import {
-  cancelPendingRetry,
-  clearPendingRetries,
+  clearPendingRetry,
+  findPendingRetry,
   hasPendingRetry,
-  pendingAttempt,
-  scheduleOneShotRetry,
-} from "../../src/services/retry-registry";
+} from "../../src/services/retry-state";
 import {
   defaultSweepDeps,
   sweepMissedRuns,
@@ -46,13 +45,19 @@ import {
   startTestServer,
 } from "./harness";
 
-// Phase 14 integration tests. The retry decision is exercised against the real
-// database (runs, users.retryIntroShown, the partial unique index) and the real
-// in-memory registry, with the automation itself mocked so no Chromium
-// launches. The wall-clock cutoff is time-of-day dependent, so scheduling
-// scenarios inject a MORNING anchor (todayAtManila) — a clock-in retry in the
-// afternoon is correctly refused, and the tests must not depend on when the
-// suite happens to run.
+// Retry-on-transient-failure integration tests. The retry decision is exercised
+// against the real database (runs, `runs.retry_at`, users.retry_intro_shown, the
+// partial unique index) with the automation itself mocked so no Chromium
+// launches.
+//
+// Phase 15B changed WHERE the pending retry lives: `runs.retry_at` on the failed
+// run's own row, read by the tick, instead of an in-memory Map. So "a retry is
+// pending" is now a database assertion, and "the retry fires" is
+// `fireDueRetries(tickInstant)`.
+//
+// The wall-clock cutoff is time-of-day dependent, so scheduling scenarios inject
+// a MORNING anchor (todayAtManila) — a clock-in retry in the afternoon is
+// correctly refused, and the tests must not depend on when the suite runs.
 vi.mock("../../src/automation/runAutomation", () => ({
   runAutomation: vi
     .fn()
@@ -116,13 +121,15 @@ async function lastRun(
 }
 
 /** Insert a real FAILED run row for (user, action, attempt), failing at the
- *  Manila instant `at`. Returns the row, ready for scheduleRetryOnFailure. */
+ *  Manila instant `at` — optionally with a retry already queued at `retryAt`
+ *  (the shape a restart leaves behind). */
 async function insertFailedRun(
   userId: string,
   action: "in" | "out",
   attempt: number,
   at: Date,
-) {
+  retryAt: Date | null = null,
+): Promise<Run> {
   const [row] = await db
     .insert(runs)
     .values({
@@ -133,6 +140,7 @@ async function insertFailedRun(
       error: "boom: HRHub unreachable",
       startedAt: at,
       finishedAt: at,
+      retryAt,
     })
     .returning();
   if (!row) throw new Error("insertFailedRun: insert returned no row");
@@ -164,13 +172,11 @@ describe("retry on transient failure", () => {
   });
   beforeEach(async () => {
     await resetDatabase();
-    clearPendingRetries();
     (
       notificationsModule.dispatch as unknown as ReturnType<typeof vi.fn>
     ).mockClear();
   });
   afterEach(() => {
-    clearPendingRetries();
     delete process.env["EXTRA_HOLIDAYS"];
   });
   afterAll(async () => {
@@ -195,14 +201,13 @@ describe("retry on transient failure", () => {
         .limit(1);
       expect(failed?.status).toBe("failure");
 
-      // The real executor failure above ALSO schedules a retry, and finalizeRun
-      // has no injected clock, so it anchors on the wall clock. Before the 12:00
-      // cutoff that leaves a pending retry (making the anchored call below a
-      // deliberate no-op) and a "will retry" dispatch naming the real time —
-      // which is why the 06:05 assertion below only passed in the afternoon.
-      // Reset both so what follows measures the injected morning anchor, which
-      // is the property this half of the test exists for.
-      clearPendingRetries();
+      // The real executor failure above ALSO queued a retry, anchored on the
+      // wall clock. Before the 12:00 cutoff that leaves a pending retry (making
+      // the anchored call below a deliberate no-op) and a "will retry" dispatch
+      // naming the real time — which is why the 06:05 assertion below only
+      // passed in the afternoon. Clear it so what follows measures the injected
+      // morning anchor, which is the property this half of the test exists for.
+      await clearPendingRetry(userId, "in", todayStr());
       (
         notificationsModule.dispatch as unknown as ReturnType<typeof vi.fn>
       ).mockClear();
@@ -213,22 +218,20 @@ describe("retry on transient failure", () => {
       if (!failedRow) throw new Error("expected the failed run row");
       await scheduleRetryOnFailure(failedRow, morning);
 
-      await vi.waitFor(() => {
-        expect(hasPendingRetry(userId, "in", todayStr())).toBe(true);
-      });
-      expect(pendingAttempt(userId, "in", todayStr())).toBe(1);
+      const queued = await findPendingRetry(userId, "in", todayStr());
+      expect(queued?.attempt).toBe(1);
+      expect(queued?.retryAt.getTime()).toBe(todayAtManila(6, 5).getTime());
 
       // Calling again for the same run must not stack a second retry.
       await scheduleRetryOnFailure(failedRow, morning);
-      expect(pendingAttempt(userId, "in", todayStr())).toBe(1);
+      expect((await findPendingRetry(userId, "in", todayStr()))?.attempt).toBe(1);
 
       // ONE "will retry" message naming the next attempt time (06:05). The
       // dispatch is fire-and-forget, so wait for it.
       await vi.waitFor(() => {
         expect(retryScheduledDispatches().length).toBe(1);
       });
-      const scheduled = retryScheduledDispatches();
-      expect(scheduled[0]).toContain("06:05");
+      expect(retryScheduledDispatches()[0]).toContain("06:05");
     });
 
     it("a skipped run schedules ZERO retries (the double-clock guard)", async () => {
@@ -249,24 +252,17 @@ describe("retry on transient failure", () => {
       await executeQueuedRun(run.id);
 
       // The most important assertion in the phase: a skip must never queue a
-      // retry — retrying a skip would risk a double clock.
-      expect(hasPendingRetry(userId, "in", todayStr())).toBe(false);
-      expect(pendingAttempt(userId, "in", todayStr())).toBeUndefined();
-      const [row] = await db
-        .select({ status: runs.status })
-        .from(runs)
-        .where(eq(runs.id, run.id))
-        .limit(1);
+      // retry — retrying a skip would risk a double clock. It is now a
+      // database fact: the run's own retry_at stays NULL.
+      const [row] = await db.select().from(runs).where(eq(runs.id, run.id)).limit(1);
       expect(row?.status).toBe("skipped");
+      expect(row?.retryAt).toBeNull();
+      expect(await hasPendingRetry(userId, "in", todayStr())).toBe(false);
 
       // And the scheduling entry point itself refuses a skipped run.
-      const skippedRow = await getRunRow(run.id);
-      if (!skippedRow) throw new Error("expected the skipped run row");
-      await scheduleRetryOnFailure(
-        { ...skippedRow, status: "skipped" },
-        todayAtManila(5, 35),
-      );
-      expect(hasPendingRetry(userId, "in", todayStr())).toBe(false);
+      if (!row) throw new Error("expected the skipped run row");
+      await scheduleRetryOnFailure({ ...row, status: "skipped" }, todayAtManila(5, 35));
+      expect(await hasPendingRetry(userId, "in", todayStr())).toBe(false);
     });
   });
 
@@ -279,10 +275,8 @@ describe("retry on transient failure", () => {
       // attempt 0 fails at 05:35 -> schedules attempt 1.
       const r0 = await insertFailedRun(userId, "in", 0, t0);
       await scheduleRetryOnFailure(r0, t0);
-      await vi.waitFor(() => {
-        expect(hasPendingRetry(userId, "in", todayStr())).toBe(true);
-      });
-      expect(pendingAttempt(userId, "in", todayStr())).toBe(1);
+      const first = await findPendingRetry(userId, "in", todayStr());
+      expect(first?.attempt).toBe(1);
       // The first-failure message is fire-and-forget, so wait for it.
       await vi.waitFor(() => {
         expect(retryScheduledDispatches().length).toBe(1);
@@ -291,62 +285,62 @@ describe("retry on transient failure", () => {
       // Each retry fires 30 min later and fails at that instant.
       for (let attempt = 1; attempt <= policy.maxAttempts; attempt++) {
         const at = todayAtManila(5, 5 + 30 * attempt);
-        // The pending attempt is consumed when it fires (attemptRun cancels it).
-        cancelPendingRetry(userId, "in", todayStr());
+        // The pending attempt is consumed when it fires (the tick claims it).
+        await clearPendingRetry(userId, "in", todayStr());
         const rN = await insertFailedRun(userId, "in", attempt, at);
         await scheduleRetryOnFailure(rN, at);
         if (attempt < policy.maxAttempts) {
           // Intermediate attempts: STILL no give-up (silence between attempts).
-          await vi.waitFor(() => {
-            expect(pendingAttempt(userId, "in", todayStr())).toBe(attempt + 1);
-          });
+          const next = await findPendingRetry(userId, "in", todayStr());
+          expect(next?.attempt).toBe(attempt + 1);
           expect(giveUpDispatches().length).toBe(0);
         }
       }
 
-      // After the max attempt: no pending retry, exactly ONE give-up message.
+      // After the max attempt: no queued retry, exactly ONE give-up message.
+      expect(await hasPendingRetry(userId, "in", todayStr())).toBe(false);
       await vi.waitFor(() => {
-        expect(hasPendingRetry(userId, "in", todayStr())).toBe(false);
+        expect(giveUpDispatches().length).toBe(1);
       });
-      const giveUps = giveUpDispatches();
-      expect(giveUps.length).toBe(1);
-      expect(giveUps[0]).toContain(`failed ${policy.maxAttempts} times`);
+      expect(giveUpDispatches()[0]).toContain(
+        `failed ${policy.maxAttempts} times`,
+      );
 
       // One row per attempt (original + N retries), all terminal, none active.
       const rows = await db
-        .select({ attempt: runs.attempt, status: runs.status })
+        .select({ attempt: runs.attempt, status: runs.status, retryAt: runs.retryAt })
         .from(runs)
         .where(and(eq(runs.userId, userId), eq(runs.action, "in")));
       expect(rows).toHaveLength(policy.maxAttempts + 1);
-      for (const r of rows) expect(r.status).toBe("failure");
-      expect(
-        rows.some((r) => r.status === "pending" || r.status === "running"),
-      ).toBe(false);
+      for (const r of rows) {
+        expect(r.status).toBe("failure");
+        expect(r.retryAt).toBeNull();
+      }
     });
 
     it("the cutoff holds independently of the cap (integration)", async () => {
       const { userId } = await userWithCredentials();
       // A clock-in failure at 11:45 Manila with the default 30 min interval
       // would retry at 12:15 — past the 12:00 clock-in cutoff. No retry is
-      // scheduled even though attempt 0 < maxAttempts (the cap alone would
-      // allow it).
+      // queued even though attempt 0 < maxAttempts (the cap alone would allow it).
       const at = new Date("2026-08-10T11:45:00+08:00");
       const r0 = await insertFailedRun(userId, "in", 0, at);
       await scheduleRetryOnFailure(r0, at);
 
-      expect(hasPendingRetry(userId, "in", "2026-08-10")).toBe(false);
-      expect(pendingAttempt(userId, "in", "2026-08-10")).toBeUndefined();
+      expect(await hasPendingRetry(userId, "in", "2026-08-10")).toBe(false);
+      const [row] = await db.select().from(runs).where(eq(runs.id, r0.id)).limit(1);
+      expect(row?.retryAt).toBeNull();
       // Prove the brake that stopped it was the cutoff, not the cap.
       expect(0).toBeLessThan(currentPolicy().maxAttempts);
     });
   });
 
   describe("cancellation", () => {
-    it("a manual run for the action cancels the pending retry", async () => {
+    it("a manual run for the action cancels the queued retry", async () => {
       const { userId, cookie } = await userWithCredentials();
       const r0 = await insertFailedRun(userId, "in", 0, todayAtManila(5, 35));
       await scheduleRetryOnFailure(r0, todayAtManila(5, 35));
-      await vi.waitFor(() => expect(hasPendingRetry(userId, "in", todayStr())).toBe(true));
+      expect(await hasPendingRetry(userId, "in", todayStr())).toBe(true);
 
       // "Clock in now" — the route, not a direct service call.
       const res = await request("/runs", {
@@ -355,14 +349,14 @@ describe("retry on transient failure", () => {
         body: { action: "in" },
       });
       expect(res.status).toBe(202);
-      await vi.waitFor(() => expect(hasPendingRetry(userId, "in", todayStr())).toBe(false));
+      expect(await hasPendingRetry(userId, "in", todayStr())).toBe(false);
     });
 
-    it("a successful run for the same action cancels the pending retry", async () => {
+    it("a successful run for the same action cancels the queued retry", async () => {
       const { userId } = await userWithCredentials();
       const r0 = await insertFailedRun(userId, "in", 0, todayAtManila(5, 35));
       await scheduleRetryOnFailure(r0, todayAtManila(5, 35));
-      await vi.waitFor(() => expect(hasPendingRetry(userId, "in", todayStr())).toBe(true));
+      expect(await hasPendingRetry(userId, "in", todayStr())).toBe(true);
 
       // A new run starts and succeeds: the retry is superseded at start.
       const manual = await startRun({ userId, action: "in" });
@@ -375,15 +369,14 @@ describe("retry on transient failure", () => {
       });
       await executeQueuedRun(manual.run.id);
 
-      expect(hasPendingRetry(userId, "in", todayStr())).toBe(false);
+      expect(await hasPendingRetry(userId, "in", todayStr())).toBe(false);
     });
 
     it("a pause set mid-morning cancels a queued retry", async () => {
       const { userId } = await userWithCredentials();
       await db.insert(schedules).values({ userId, enabled: true });
-      const r0 = await insertFailedRun(userId, "in", 0, todayAtManila(5, 35));
-      await scheduleRetryOnFailure(r0, todayAtManila(5, 35));
-      await vi.waitFor(() => expect(hasPendingRetry(userId, "in", todayStr())).toBe(true));
+      const due = todayAtManila(6, 5);
+      await insertFailedRun(userId, "in", 0, todayAtManila(5, 35), due);
 
       // Pause window covering today (set "mid-morning"): the queued retry must
       // not run.
@@ -393,25 +386,25 @@ describe("retry on transient failure", () => {
         .where(eq(schedules.userId, userId));
       const before = await db.$count(runs, eq(runs.userId, userId));
 
-      await attemptRun(userId, "in", todayStr(), 1);
+      await fireDueRetries(due);
 
-      expect(hasPendingRetry(userId, "in", todayStr())).toBe(false);
+      expect(await hasPendingRetry(userId, "in", todayStr())).toBe(false);
       expect(await db.$count(runs, eq(runs.userId, userId))).toBe(before);
     });
 
     it("a retry attempt on a holiday does not run", async () => {
       const { userId } = await userWithCredentials();
-      // Control: without the override, today is a normal day — the retry runs.
-      await attemptRun(userId, "in", todayStr(), 1);
-      expect(await db.$count(runs, eq(runs.userId, userId))).toBe(1);
-      clearPendingRetries();
+      const due = todayAtManila(6, 5);
+      await insertFailedRun(userId, "in", 0, todayAtManila(5, 35), due);
 
       // With an operator override for today, the retry attempt is cancelled.
       process.env["EXTRA_HOLIDAYS"] = `${todayStr()}=Test Proclamation Day`;
-      const { userId: user2 } = await userWithCredentials();
-      await attemptRun(user2, "in", todayStr(), 1);
-      expect(await db.$count(runs, eq(runs.userId, user2))).toBe(0);
-      expect(hasPendingRetry(user2, "in", todayStr())).toBe(false);
+      const before = await db.$count(runs, eq(runs.userId, userId));
+
+      await fireDueRetries(due);
+
+      expect(await db.$count(runs, eq(runs.userId, userId))).toBe(before);
+      expect(await hasPendingRetry(userId, "in", todayStr())).toBe(false);
     });
   });
 
@@ -424,21 +417,24 @@ describe("retry on transient failure", () => {
       if (!started.ok) return;
 
       const before = await db.$count(runs, eq(runs.userId, userId));
+      const due = todayAtManila(6, 5);
+      await insertFailedRun(userId, "out", 0, todayAtManila(5, 35), due);
+
       // The retry fires while the other run is still active.
-      await expect(
-        attemptRun(userId, "in", todayStr(), 1),
-      ).resolves.toBeUndefined();
+      await expect(fireDueRetries(due)).resolves.toBeUndefined();
 
       // Exactly one active run survived; the retry did not add a second and did
       // not error out.
-      expect(await db.$count(runs, eq(runs.userId, userId))).toBe(before);
-      expect(hasPendingRetry(userId, "in", todayStr())).toBe(false);
+      expect(await db.$count(runs, eq(runs.userId, userId))).toBe(before + 1);
+      expect(await hasPendingRetry(userId, "out", todayStr())).toBe(false);
       const [row] = await db
         .select({ status: runs.status })
         .from(runs)
-        .where(eq(runs.userId, userId))
+        .where(
+          and(eq(runs.userId, userId), inArray(runs.status, ["pending", "running"])),
+        )
         .limit(1);
-      expect(["pending", "running"]).toContain(row?.status);
+      expect(row?.status).toBeDefined();
     });
   });
 
@@ -461,14 +457,11 @@ describe("retry on transient failure", () => {
         .limit(1);
       expect(u?.shown).toBe(true);
 
-      // Second incident (a fresh failure after the first retry was superseded):
-      // no second mention of the defaults.
-      clearPendingRetries();
+      // Second incident (a fresh failure for another action): no second mention
+      // of the defaults.
       const r1 = await insertFailedRun(userId, "out", 0, todayAtManila(5, 35));
       await scheduleRetryOnFailure(r1, todayAtManila(5, 35));
-      await vi.waitFor(() => {
-        expect(hasPendingRetry(userId, "out", todayStr())).toBe(true);
-      });
+      expect(await hasPendingRetry(userId, "out", todayStr())).toBe(true);
 
       const intros = retryScheduledDispatches().filter((html) =>
         html.includes("Retrying every"),
@@ -476,7 +469,7 @@ describe("retry on transient failure", () => {
       expect(intros.length).toBe(1);
     });
 
-    it("no duplicate missed-run alert while a retry is pending", async () => {
+    it("no duplicate missed-run alert while a retry is queued (the durable read)", async () => {
       const { userId } = await userWithCredentials();
       await db.insert(schedules).values({
         userId,
@@ -485,7 +478,7 @@ describe("retry on transient failure", () => {
         enabled: true,
       });
       // A failed run from YESTERDAY (outside the sweep's 24h hasRunToday window)
-      // is not the suppressant — only the pending retry can be.
+      // is not the suppressant — only the queued retry can be.
       await db.insert(runs).values({
         userId,
         action: "in",
@@ -504,11 +497,11 @@ describe("retry on transient failure", () => {
         },
       };
 
-      // Control: without a pending retry the missed alert fires.
+      // Control: without a queued retry the missed alert fires.
       await sweepMissedRuns(deps);
       expect(sent.length).toBe(1);
 
-      // Now with a pending retry for the sweep's day: the sweep stays silent.
+      // Now with a retry queued for the sweep's day: the sweep stays silent.
       sent.length = 0;
       await db
         .delete(missedRunNotices)
@@ -516,15 +509,13 @@ describe("retry on transient failure", () => {
       await db
         .insert(missedRunNotices)
         .values({ userId, manilaDate: "2026-08-10", action: "in" });
-      const fireAt = new Date(Date.now() + 30 * 60 * 1000);
-      scheduleOneShotRetry({
-        userId,
-        action: "in",
-        manilaDate: "2026-08-10",
-        attempt: 1,
-        fireAt,
-        onFire: () => {},
-      });
+      // The queued retry lives on the failed run's own row now, and the sweep
+      // matches it by `retry_at`'s Manila day — which is the whole point of 15B.
+      await db
+        .update(runs)
+        .set({ retryAt: new Date("2026-08-10T06:05:00+08:00") })
+        .where(and(eq(runs.userId, userId), eq(runs.action, "in")));
+
       await sweepMissedRuns(deps);
       expect(sent.length).toBe(0);
     });
@@ -563,7 +554,7 @@ describe("retry on transient failure", () => {
       expect(finished!.finishedAt!.getTime() - before).toBeLessThan(30_000);
 
       // The retry-scheduling path (with a morning anchor) must not throw either
-      // — the dead endpoint cannot turn a failure into a 500. It schedules the
+      // — the dead endpoint cannot turn a failure into a 500. It queues the
       // retry (return "retry") and the notification is fire-and-forget.
       const r0 = await insertFailedRun(userId, "out", 0, todayAtManila(5, 35));
       await expect(

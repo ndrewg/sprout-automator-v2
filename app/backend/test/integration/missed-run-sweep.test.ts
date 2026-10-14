@@ -58,7 +58,7 @@ describe("missed-run reconciliation sweep", () => {
 
     await sweepMissedRuns(deps);
     expect(sent).toHaveLength(1);
-    expect(sent[0]).toContain("Clock-in did not run");
+    expect(sent[0]).toContain("Missed the 05:30 clock-in");
     expect(
       await db.$count(missedRunNotices, eq(missedRunNotices.userId, userId)),
     ).toBe(1);
@@ -120,8 +120,8 @@ describe("missed-run reconciliation sweep", () => {
 
     await sweepMissedRuns(deps);
     expect(sent).toHaveLength(1);
-    expect(sent[0]).toContain("Clock-out did not run");
-    expect(sent[0]).toContain("Clock out manually if you haven't already.");
+    expect(sent[0]).toContain("Missed the 18:05 clock-out");
+    expect(sent[0]).toContain("Clock out yourself if you're working today.");
 
     const [notice] = await db
       .select()
@@ -207,7 +207,7 @@ describe("missed-run reconciliation sweep", () => {
 
     await sweepMissedRuns(deps);
     expect(sent).toHaveLength(1);
-    expect(sent[0]).toContain("Clock-in did not run");
+    expect(sent[0]).toContain("Missed the 05:30 clock-in");
     const [notice] = await db
       .select()
       .from(missedRunNotices)

@@ -9,7 +9,7 @@ import express, {
 import { pinoHttp } from "pino-http";
 import cookieParser from "cookie-parser";
 import { sql } from "drizzle-orm";
-import { config } from "./config";
+import { config, schedulerEnabled } from "./config";
 import { logger } from "./lib/logger";
 import { db } from "./db/client";
 import { attachUser } from "./middleware/auth";
@@ -114,7 +114,11 @@ app.use("/notifications", notificationsRouter);
 //   - scheduler: does the number of schedules REGISTERED in this process
 //     match the number of ENABLED schedules in the database? A backend that
 //     booted but registered zero schedules (and so will never run again) is
-//     broken, and today nothing reports it.
+//     broken, and today nothing reports it. Since phase 15D the check only
+//     applies where this host is SUPPOSED to schedule — with
+//     SCHEDULER_ENABLED unset/false the process deliberately registers nothing,
+//     and reporting that as degraded would make an uptime monitor page someone
+//     about a host that was never meant to clock anybody.
 //   - queue: the run-queue depth, so a wedged queue is visible.
 app.get("/health", async (_req: Request, res: Response) => {
   let dbStatus: "ok" | "down" = "down";
@@ -127,11 +131,16 @@ app.get("/health", async (_req: Request, res: Response) => {
     logger.error({ err }, "health DB check failed");
   }
 
+  const enabled = schedulerEnabled();
   const registered = activeScheduleCount();
   // enabledInDb > 0 but nothing registered means the process never rehydrated
-  // its schedules — it is alive but will never run. That is degraded.
-  const scheduleMismatch = enabledInDb > 0 && registered === 0;
-  const registeredMatchesEnabled = enabledInDb === 0 || registered === enabledInDb;
+  // its schedules — it is alive but will never run. That is degraded, but only
+  // on a host whose job is to schedule.
+  const scheduleMismatch = enabled && enabledInDb > 0 && registered === 0;
+  // "Consistent with what this process was asked to do": a scheduler that is
+  // switched off matches by not registering anything.
+  const registeredMatchesEnabled =
+    !enabled || enabledInDb === 0 || registered === enabledInDb;
   const { active, waiting, cap } = runQueue.stats();
 
   const degraded = dbStatus === "down" || scheduleMismatch;
@@ -141,6 +150,9 @@ app.get("/health", async (_req: Request, res: Response) => {
     version: "0.0.0",
     db: dbStatus,
     scheduler: {
+      // Phase 15D: whether THIS process schedules at all. false is the default
+      // and a valid, healthy deployment on every host but the scheduled one.
+      enabled,
       registered,
       enabledInDb,
       registeredMatchesEnabled,

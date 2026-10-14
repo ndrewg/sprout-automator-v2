@@ -117,6 +117,27 @@ const envSchema = z.object({
     .preprocess(emptyToUndefined, z.string().default("12:00")),
   RETRY_CLOCKOUT_CUTOFF: z
     .preprocess(emptyToUndefined, z.string().default("23:00")),
+  // One host schedules (phase 15D, D8). A boolean that defaults to FALSE: when
+  // it is not explicitly true, `startScheduler()` is never called, so this
+  // process registers no daily slots, no retries, no missed-run sweep and no
+  // nightly jobs. Manual runs and the whole UI still work.
+  //
+  // Why default false: two hosts share one codebase but have SEPARATE
+  // databases, so each one's unique index only protects itself — two
+  // scheduling hosts would both clock, and each would take the other's OTP.
+  // Clocking anyone has to be opted into, one line in the scheduled host's
+  // .env: SCHEDULER_ENABLED=true.
+  //
+  // Strict "true" / "false": a typo (SCHEDULER_ENABLED=yes) refuses to boot
+  // rather than silently disabling the host that does the clocking.
+  SCHEDULER_ENABLED: z
+    .preprocess(
+      emptyToUndefined,
+      z.enum(["true", "false"], {
+        errorMap: () => ({ message: 'expected "true" or "false"' }),
+      }).default("false"),
+    )
+    .transform((value) => value === "true"),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;
@@ -223,3 +244,17 @@ export function parseHhmm(value: string): { hour: number; minute: number } {
 }
 
 export const config: AppConfig = loadConfig();
+
+/**
+ * Whether THIS process schedules (phase 15D, D8). `config` is the production
+ * source of truth; the env override exists so a test can flip the flag without
+ * re-loading the module (the same lazy-read pattern as lib/heartbeat.ts's
+ * heartbeatUrl and services/holidays.ts's extraHolidaysRaw). Anything other
+ * than the literal "true" is false — and a value that is neither "true" nor
+ * "false" has already refused to boot inside loadConfig().
+ */
+export function schedulerEnabled(): boolean {
+  const override = process.env["SCHEDULER_ENABLED"];
+  if (override === undefined || override === "") return config.SCHEDULER_ENABLED;
+  return override === "true";
+}
