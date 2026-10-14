@@ -33,7 +33,7 @@ Section **A** is structural work already done — **confirm, do not repeat it.**
    cd app/backend  && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integration
    cd app/frontend && pnpm lint && pnpm test && pnpm build && pnpm test:e2e
    ```
-   Postgres up first. Confirm the **counts** — 161 / 106 / 5 / 16 is the baseline; lower is a finding.
+   Postgres up first. Confirm the **counts** against `rebuild/STATE.md`, not a fixed number — **161 / 106 / 5 / 16 is stale**; the last recorded figure (phase 14, 2026-08-24) was 225 / 150 / 5 / 16, and STATE.md's Known gaps section flags even that as provisional until phase 15 §15B re-establishes it from cold. Lower than whatever STATE.md currently says is a finding.
 3. **Read `AGENTS.md` and the phase file**, then check the diff against them.
 
 ## 🚫 You do not write code

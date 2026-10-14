@@ -45,7 +45,7 @@ cd app/backend  && pnpm lint && pnpm typecheck && pnpm test && pnpm test:integra
 cd app/frontend && pnpm lint && pnpm test && pnpm build && pnpm exec playwright install chromium && pnpm test:e2e
 ```
 
-Postgres must be up: `docker compose up -d postgres`. **Confirm the counts, not just green** — baseline is 161 backend unit / 106 backend integration / 5 frontend unit / 16 e2e. A count that went *down* is a finding.
+Postgres must be up: `docker compose up -d postgres`. **Confirm the counts, not just green** — read the current baseline out of `rebuild/STATE.md`, not from a fixed number here. **The old 161/106/5/16 figure is stale**; the last recorded count (phase 14, 2026-08-24) was 225 backend unit / 150 backend integration / 5 frontend unit / 16 e2e, and STATE.md's Known gaps section flags even that as provisional until phase 15 §15B re-establishes it from cold. A count that went *down* from whatever STATE.md currently says is a finding.
 
 If you touch the container, use `--build` when source changed and `--force-recreate` when you need a clean in-memory rate-limit store. A stale image has faked a pass on this project before.
 
