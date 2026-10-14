@@ -61,7 +61,7 @@ Phase 11 is small and carries a live defect that files a false attendance record
 
 **Phases 10–14 are committed as of 2026-08-24, so this exception no longer applies at all** — — 2026-08-21 already misfired unfixed, and the next weekday miss is **2026-11-02** (All Souls'). Check `date` yourself rather than trusting this paragraph, and say in your report which branch you took.
 
-Otherwise honour the dependencies the queue records: **13 and 14 both require 11**; **17 requires 16**.
+Otherwise honour the dependencies the queue records: **16, 17 and 18 require 15**; **20 requires 19** (re-planned 2026-10-14).
 
 ## The loop, per phase
 
@@ -92,7 +92,7 @@ Phase 8 genuinely took five rounds and each found something real, so a cap is a 
 
 The subagents verify their own work; you check the things only a coordinator sees.
 
-- **Test counts.** The old 161 / 106 / 5 / 16 baseline is **stale and untrustworthy** — the phase 10–14 run never recorded final backend totals and the suite was flaky. Phase 15 § 15B re-establishes it; until then, read the current baseline out of `rebuild/STATE.md` rather than assuming. Higher is expected when a phase adds tests. **Lower is a finding** — a suite running fewer tests than before has silently stopped testing something. Challenge it rather than accepting it.
+- **Test counts.** The old 161 / 106 / 5 / 16 baseline is **stale and untrustworthy** — the phase 10–14 run never recorded final backend totals and the suite was flaky. Phase 15 § 15E (re-planned 2026-10-14) re-establishes it; until then, read the current baseline out of `rebuild/STATE.md` rather than assuming. Higher is expected when a phase adds tests. **Lower is a finding** — a suite running fewer tests than before has silently stopped testing something. Challenge it rather than accepting it.
 - **Scope.** If a diff touches something `BACKLOG.md` records as deliberately deferred, that is scope creep. Send it back.
 - **Config keys.** A new key must appear in `config.ts`, `.env.example` **and both compose files**. An entire phase existed because seven keys reached `.env` and never reached the container.
 - **Migrations.** No committed migration may be edited, ever. A new one only if the phase called for it.
