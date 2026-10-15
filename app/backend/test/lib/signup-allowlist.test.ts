@@ -26,7 +26,7 @@ describe("parseSignupAllowlist", () => {
 describe("isEmailAllowed", () => {
   it("a domain entry admits any address at that exact domain", () => {
     const list = ["orchard.com.au", "example.com"];
-    expect(isEmailAllowed("maz@orchard.com.au", list)).toBe(true);
+    expect(isEmailAllowed("someone@orchard.com.au", list)).toBe(true);
     expect(isEmailAllowed("someone@example.com", list)).toBe(true);
   });
 
@@ -69,7 +69,7 @@ describe("isEmailAllowed", () => {
 
   it("a bare @ alongside a real entry does not widen it", () => {
     const list = ["@", "orchard.com.au"];
-    expect(isEmailAllowed("maz@orchard.com.au", list)).toBe(true);
+    expect(isEmailAllowed("someone@orchard.com.au", list)).toBe(true);
     expect(isEmailAllowed("stranger@example.com", list)).toBe(false);
   });
 });

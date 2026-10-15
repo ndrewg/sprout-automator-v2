@@ -100,9 +100,12 @@ describe("redactSecrets", () => {
   });
 
   it("redacts a Telegram bot token wherever it appears", () => {
-    const url = "https://api.telegram.org/bot123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw/sendMessage";
+    // Built at runtime so no token-shaped literal sits in the repo for secret
+    // scanners to flag. It is obviously fake: "x" repeated.
+    const secret = "x".repeat(35);
+    const url = `https://api.telegram.org/bot123456789:${secret}/sendMessage`;
     const out = redactSecrets(`request to ${url} failed`);
-    expect(out).not.toContain("AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw");
+    expect(out).not.toContain(secret);
     expect(out).toContain("[Redacted]");
   });
 
