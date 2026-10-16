@@ -201,8 +201,16 @@ export async function clockAttempt(
   // not have landed. Recorded, alerted, NEVER auto-retried — a retry here is a
   // second clock against a day whose state we do not know.
   const detail = unknownOutcomeDetail();
+  const pressSaid =
+    press.outcome === "confirmed"
+      ? "HRHub showed its success dialog"
+      : press.outcome === "error_dialog"
+        ? "HRHub showed an error"
+        : "HRHub showed no dialog";
   log?.(
-    `Clock ${label} state unknown: the card shows no ${label} row and HRHub did not confirm (${press.outcome}).`,
+    `Clock ${label} state unknown: ${pressSaid}, but the card ${
+      after.readable ? `shows no ${label} row` : "could not be read"
+    }.`,
   );
   return { outcome: "unknown", loginMethod, error: detail };
 }

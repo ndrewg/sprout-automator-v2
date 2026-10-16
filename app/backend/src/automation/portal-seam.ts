@@ -72,9 +72,9 @@ export type HRHubPortal = {
   /**
    * Read today's attendance card.
    *
-   * `settleMs` waits for HRHub to refresh the widget before reading — used for
-   * the AFTER-action read, where the click's own refresh may still be in
-   * flight. Never throws for a missing card: an unreadable card is data
+   * `settleMs` marks the AFTER-action read: wait that long for the click's
+   * request to land, then reload the dashboard before reading, because HRHub
+   * does not repaint the widget itself after a clock action. Never throws for a missing card: an unreadable card is data
    * (`readable: false`), because "we could not read it" is a decision the
    * orchestration makes, not an exception it catches.
    */

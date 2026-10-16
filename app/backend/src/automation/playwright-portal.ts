@@ -187,10 +187,14 @@ export function createPlaywrightPortal(args: PlaywrightPortalArgs): HRHubPortal 
       const page = requirePage();
       const settleMs = options?.settleMs ?? 0;
       if (settleMs > 0) {
-        // A short bounded wait for HRHub to repaint the widget: the action's own
-        // callback calls GetEmployeeDashBoard(), so the row is not necessarily
-        // in the DOM the instant the dialog was dismissed.
+        // The AFTER read. HRHub does NOT repaint the Attendance widget after a
+        // clock action: on 2026-10-15/16 the success dialog appeared, the
+        // punch landed, and the card still showed the old rows seconds later,
+        // so both live runs ended "unknown". Let the request settle, then
+        // reload the dashboard — a plain GET of the page (the clock action is
+        // AJAX, so nothing is resubmitted) — and read the fresh card.
         await page.waitForTimeout(settleMs);
+        await page.reload({ waitUntil: "networkidle", timeout: 30000 }).catch(() => {});
       }
       const card = await readCardText();
       if (!card.ok) {
